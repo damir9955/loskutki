@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F6EDD8"/>
+      <stop offset="1" stop-color="#EADCBB"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect x="26" y="26" width="460" height="460" rx="76" fill="none" stroke="#8B5E3C" stroke-width="14"/>
+  <rect x="46" y="46" width="420" height="420" rx="58" fill="none" stroke="#8B5E3C" stroke-width="5" stroke-dasharray="24 16" opacity="0.7"/>
+  <!-- лоскуток-уголок -->
+  <path d="M 96 96 h 128 v 128 h -64 v 64 h -64 z" fill="#C0603A" stroke="#8E4224" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M 96 96 h 128 v 128 h -64 v 64 h -64 z" fill="none" stroke="#7A3B1D" stroke-width="5" stroke-dasharray="14 10"/>
+  <!-- лоскуток-крест -->
+  <g transform="translate(320 200)">
+    <path d="M -52 -88 h 104 v 52 h 52 v 104 h -52 v 52 h -104 v -52 h -52 v -104 h 52 z" fill="#3E7C74" stroke="#2C5A54" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M -52 -88 h 104 v 52 h 52 v 104 h -52 v 52 h -104 v -52 h -52 v -104 h 52 z" fill="none" stroke="#1F443F" stroke-width="5" stroke-dasharray="14 10"/>
+  </g>
+  <!-- маленький лоскуток -->
+  <g transform="translate(140 384)">
+    <rect x="-64" y="-64" width="128" height="128" rx="18" fill="#D9A13F" stroke="#A6721F" stroke-width="7"/>
+    <rect x="-64" y="-64" width="128" height="128" rx="18" fill="none" stroke="#8A5E13" stroke-width="5" stroke-dasharray="14 10"/>
+    <circle cx="-22" cy="-22" r="7" fill="#8A5E13"/>
+    <circle cx="22" cy="-22" r="7" fill="#8A5E13"/>
+    <circle cx="-22" cy="22" r="7" fill="#8A5E13"/>
+    <circle cx="22" cy="22" r="7" fill="#8A5E13"/>
+  </g>
+  <!-- пуговица -->
+  <g transform="translate(392 392)">
+    <circle r="52" fill="#F4EAD5" stroke="#A9855A" stroke-width="8"/>
+    <circle cx="-16" cy="-16" r="8" fill="#8a6b46"/>
+    <circle cx="16" cy="-16" r="8" fill="#8a6b46"/>
+    <circle cx="-16" cy="16" r="8" fill="#8a6b46"/>
+    <circle cx="16" cy="16" r="8" fill="#8a6b46"/>
+  </g>
+</svg>

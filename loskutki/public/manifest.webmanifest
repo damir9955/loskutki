@@ -1,0 +1,32 @@
+{
+  "name": "Лоскутки — пэчворк-дуэль",
+  "short_name": "Лоскутки",
+  "description": "Мобильная игра по мотивам настольного Patchwork: сшивайте полотно из лоскутков и обыгрывайте бота.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F3E9D2",
+  "theme_color": "#F3E9D2",
+  "lang": "ru",
+  "categories": ["games", "puzzle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

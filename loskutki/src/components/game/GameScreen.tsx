@@ -1,0 +1,935 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  ChevronsRight,
+  Check,
+  FlipHorizontal,
+  Lightbulb,
+  RotateCw,
+  X,
+} from 'lucide-react';
+import {
+  BOT_PERSONAS,
+  LEATHER_ID,
+  PATCHES,
+  TIME_END,
+  type BotLevel,
+} from '@/lib/game/constants';
+import {
+  advanceAction,
+  advancePreview,
+  availablePatches,
+  buyAndPlace,
+  checkBuy,
+  currentPending,
+  mustAdvance,
+  placeLeather,
+} from '@/lib/game/engine';
+import { isLegalPlacement, mirroredOrientation, rotatedOrientation, orientationsFor } from '@/lib/game/placement';
+import { decideBotAction, decideLeatherCell, suggestPlacement, suggestForHuman } from '@/lib/game/bot';
+import { dailyNumber } from '@/lib/game/rng';
+import type { GameEvent, GameState } from '@/lib/game/types';
+import { QuiltBoard, MiniQuilt } from './QuiltBoard';
+import { TimeTrack, type TrackPopup } from './TimeTrack';
+import {
+  BadgePill,
+  BigStat,
+  BoardFillIcon,
+  BotAvatar,
+  ClockIcon,
+  CoinIcon,
+  GlyphDirect,
+  IncomeIcon,
+  LeatherPatchIcon,
+  MarketCard,
+  PatchDetailPopup,
+  UpcomingRibbon,
+} from './MarketRow';
+import { EndScreen } from './EndScreen';
+import { sound, vibrate } from '@/lib/sound';
+import { loadStore, recordGame, saveStore, todayKey, type GameSummary } from '@/lib/storage';
+import { useToast } from '@/hooks/use-toast';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Быстрый режим для тестов: ?fast=1 — бот и анимации не тормозят */
+const FAST = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('fast');
+const BOT_DELAY = () => (FAST ? 90 : 560 + Math.random() * 800);
+
+export interface GameScreenProps {
+  state: GameState;
+  onState: (s: GameState) => void;
+  onExit: () => void;
+  onRematch: () => void;
+  onOpenRules: () => void;
+}
+
+export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: GameScreenProps) {
+  const { toast } = useToast();
+  const [placing, setPlacing] = useState<{ marketIndex: 0 | 1 | 2; patchId: number; orientation: number; r: number; c: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [popups, setPopups] = useState<TrackPopup[]>([]);
+  const [flash, setFlash] = useState<{ player: number; pieceId: number; r?: number; c?: number } | null>(null);
+  const [quip, setQuip] = useState<string | null>(null);
+  const [showBotBoard, setShowBotBoard] = useState(false);
+  const [endedShown, setEndedShown] = useState(false);
+  const [hintOn, setHintOn] = useState(() => loadStore().settings.hints);
+  const [showHint, setShowHint] = useState(false);
+  const [botTick, setBotTick] = useState(0);
+  /** «чип» перетаскивания лоскутка с карточки (следует за пальцем вне полотна) */
+  const [dragChip, setDragChip] = useState<{ x: number; y: number; patchId: number; marketIndex: 0 | 1 | 2 } | null>(null);
+  /** лоскуток из ленты «дальше в пути» — открыта карточка с данными */
+  const [ribbonDetail, setRibbonDetail] = useState<number | null>(null);
+
+  const botRunning = useRef(false);
+  const recorded = useRef(false);
+  const popupId = useRef(1);
+  const settings = useRef(loadStore().settings);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  /** контейнер полотна — для пересчёта координат пальца в клетки */
+  const boardHostRef = useRef<HTMLDivElement>(null);
+
+  const me = state.players[0];
+  const bot = state.players[1];
+  const persona = BOT_PERSONAS[state.botLevel];
+  const myTurn = state.phase === 'action' && state.activePlayer === 0;
+  const leatherHuman = state.phase === 'placing' && currentPending(state)?.player === 0;
+  const leatherBot = state.phase === 'placing' && currentPending(state)?.player === 1;
+  const placingNow = !!placing;
+  const dragActive = !!dragChip;
+
+  const market = useMemo(() => availablePatches(state), [state]);
+  const advPreview = useMemo(() => advancePreview(state, 0), [state]);
+  const forcedAdvance = useMemo(() => mustAdvance(state), [state]);
+  const checks = useMemo(
+    () => market.map((m) => ({ m, check: checkBuy(state, m.marketIndex) })),
+    [state, market],
+  );
+  const advanceTo = Math.min(TIME_END, bot.time + 1);
+
+  // сохранение партии
+  useEffect(() => {
+    if (state.phase !== 'gameover') {
+      const store = loadStore();
+      store.currentGame = state;
+      saveStore(store);
+    }
+  }, [state]);
+
+  const addPopup = useCallback((pos: number, text: string, kind: TrackPopup['kind']) => {
+    const id = popupId.current++;
+    setPopups((p) => [...p, { id, pos, text, kind }]);
+    setTimeout(() => setPopups((p) => p.filter((x) => x.id !== id)), 1700);
+  }, []);
+
+  /** Проигрывание событий: звуки, всплывашки, паузы */
+  const playback = useCallback(
+    async (events: GameEvent[], movesHuman: boolean) => {
+      for (const e of events) {
+        if (e.type === 'buttons') {
+          const d = e.delta ?? 0;
+          if (d > 0) {
+            sound.income();
+            vibrate(12, settings.current.vibration);
+            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' ? 'buttons' : 'income');
+            await sleep(FAST ? 40 : 260);
+          } else if (d < 0 && !movesHuman) {
+            sound.buy();
+            await sleep(FAST ? 20 : 160);
+          }
+        } else if (e.type === 'place') {
+          sound.place();
+          vibrate([14, 50, 14], settings.current.vibration);
+          if (e.player !== undefined) {
+            setFlash({ player: e.player, pieceId: e.pieceId ?? -1, r: e.pos?.r, c: e.pos?.c });
+          }
+          await sleep(FAST ? 60 : 460);
+          setFlash(null);
+        } else if (e.type === 'leather') {
+          sound.leather();
+          if (e.player === 0) {
+            toast({
+              title: (
+                <span className="flex items-center gap-1.5">
+                  <LeatherPatchIcon size={18} />
+                  Кожаный лоскуток!
+                </span>
+              ),
+              description: 'Пройдена спецклетка — поставьте его на полотно.',
+            });
+          }
+          await sleep(FAST ? 20 : 200);
+        } else if (e.type === 'tile7x7') {
+          sound.tile();
+          toast({
+            title: '🏅 Золотая нашивка 7×7!',
+            description: `${e.player === 0 ? 'Вы' : persona.name} заполнили квадрат 7×7: +7 очков.`,
+          });
+          vibrate([30, 60, 30, 60, 60], settings.current.vibration);
+          await sleep(FAST ? 60 : 500);
+        } else {
+          await sleep(FAST ? 10 : 140);
+        }
+      }
+    },
+    [addPopup, persona.name, toast],
+  );
+
+  /** Применить результат действия + анимации */
+  const applyResult = useCallback(
+    async (res: { state: GameState; events: GameEvent[] }, movesHuman = false) => {
+      onState(res.state);
+      stateRef.current = res.state;
+      await playback(res.events, movesHuman);
+    },
+    [onState, playback],
+  );
+
+  // ===== ХОД БОТА (цикл — бот может действовать несколько раз подряд) =====
+  useEffect(() => {
+    if (botRunning.current) return;
+    const s0 = stateRef.current;
+    const needsBot =
+      (s0.phase === 'action' && s0.activePlayer === 1) ||
+      (s0.phase === 'placing' && currentPending(s0)?.player === 1);
+    if (!needsBot) return;
+
+    botRunning.current = true;
+    setBusy(true);
+    (async () => {
+      try {
+        sound.ensure();
+        let guard = 0;
+        while (guard++ < 12) {
+          const s = stateRef.current;
+          // кожаный лоскуток бота
+          if (s.phase === 'placing' && currentPending(s)?.player === 1) {
+            await sleep(FAST ? 120 : 650 + Math.random() * 450);
+            const cell = decideLeatherCell(s, 1);
+            const board = s.players[1].board;
+            const fallback = board.findIndex((v) => v === -1);
+            const r = cell ? cell.r : Math.floor(fallback / 9);
+            const c = cell ? cell.c : fallback % 9;
+            await applyResult(placeLeather(s, r, c));
+            continue;
+          }
+          // действие бота
+          if (s.phase === 'action' && s.activePlayer === 1) {
+            await sleep(BOT_DELAY());
+            if (Math.random() < 0.3) setQuip(persona.quips[Math.floor(Math.random() * persona.quips.length)]);
+            const decision = decideBotAction(s);
+            if (decision.action === 'advance') {
+              sound.advance();
+              await applyResult(advanceAction(s));
+            } else {
+              sound.buy();
+              await applyResult(buyAndPlace(s, decision.marketIndex!, decision.placement!));
+            }
+            const after = stateRef.current;
+            const still =
+              (after.phase === 'action' && after.activePlayer === 1) ||
+              (after.phase === 'placing' && currentPending(after)?.player === 1);
+            if (still) continue;
+          }
+          break;
+        }
+      } finally {
+        botRunning.current = false;
+        setBusy(false);
+        // повторная проверка на случай гонки эффектов
+        const s = stateRef.current;
+        if (
+          (s.phase === 'action' && s.activePlayer === 1) ||
+          (s.phase === 'placing' && currentPending(s)?.player === 1)
+        ) {
+          setTimeout(() => setBotTick((t) => t + 1), 30);
+        }
+      }
+    })();
+  }, [state, applyResult, persona, botTick]);
+
+  // ===== КОНЕЦ ПАРТИИ: СТАТИСТИКА =====
+  useEffect(() => {
+    if (state.phase === 'gameover' && !recorded.current) {
+      recorded.current = true;
+      const r = state.result!;
+      const store = loadStore();
+      const summary: GameSummary = {
+        won: r.winner === 0,
+        score: r.scores[0].total,
+        botLevel: state.botLevel,
+        coverage: state.players[0].covered,
+        leatherPlaced: state.players[0].board.filter((v) => v === LEATHER_ID).length,
+        tile7x7: state.players[0].tile7x7,
+        finalButtons: state.players[0].buttons,
+        mode: state.mode,
+        dailyKey: state.mode === 'daily' ? todayKey() : undefined,
+      };
+      const { store: next, unlocked } = recordGame(store, summary);
+      next.currentGame = null;
+      saveStore(next);
+      for (const a of unlocked) {
+        toast({ title: `${a.icon} Достижение: «${a.title}»`, description: a.description });
+      }
+      setTimeout(() => setEndedShown(true), FAST ? 200 : 900);
+    }
+  }, [state, toast]);
+
+  // ===== ДЕЙСТВИЯ ЧЕЛОВЕКА =====
+  const selectPatch = useCallback(
+    (marketIndex: 0 | 1 | 2) => {
+      const item = market.find((m) => m.marketIndex === marketIndex);
+      if (!item) return;
+      const check = checks.find((x) => x.m.marketIndex === marketIndex)?.check;
+      if (!check?.allowed) {
+        sound.error();
+        vibrate(60, settings.current.vibration);
+        return;
+      }
+      sound.ensure();
+      sound.tap();
+      const sug = suggestPlacement(state, 0, item.patchId);
+      const orients = orientationsFor(item.patchId);
+      const o = sug?.orientation ?? 0;
+      const or = orients[o];
+      setPlacing({
+        marketIndex,
+        patchId: item.patchId,
+        orientation: o,
+        r: sug ? sug.r : Math.floor((9 - or.h) / 2),
+        c: sug ? sug.c : Math.floor((9 - or.w) / 2),
+      });
+    },
+    [market, checks, state],
+  );
+
+  const confirmPlacement = useCallback(async () => {
+    if (!placing) return;
+    if (!isLegalPlacement(me.board, placing.patchId, placing)) {
+      sound.error();
+      vibrate(70, settings.current.vibration);
+      return;
+    }
+    const res = buyAndPlace(state, placing.marketIndex, {
+      orientation: placing.orientation,
+      r: placing.r,
+      c: placing.c,
+    });
+    setPlacing(null);
+    sound.buy();
+    await applyResult(res, true);
+  }, [placing, me.board, state, applyResult]);
+
+  const doAdvance = useCallback(async () => {
+    if (!myTurn) return;
+    sound.ensure();
+    sound.advance();
+    setPlacing(null);
+    await applyResult(advanceAction(state), true);
+  }, [myTurn, state, applyResult]);
+
+  const placeLeatherHuman = useCallback(
+    async (r: number, c: number) => {
+      if (me.board[r * 9 + c] !== -1) {
+        sound.error();
+        return;
+      }
+      await applyResult(placeLeather(state, r, c), true);
+    },
+    [me.board, state, applyResult],
+  );
+
+  const ghostLegal = useMemo(
+    () => (placing ? isLegalPlacement(me.board, placing.patchId, placing) : false),
+    [placing, me.board],
+  );
+
+  // подсказка (кнопка-лампочка)
+  const hint = useMemo(() => {
+    if (!showHint || !myTurn) return null;
+    return suggestForHuman(state);
+  }, [showHint, myTurn, state]);
+
+  /** текст подсказки — что именно советуем сделать */
+  const hintText = (() => {
+    if (!hint) return null;
+    if (hint.action === 'buy' && hint.marketIndex !== undefined) {
+      const item = market.find((x) => x.marketIndex === hint.marketIndex);
+      if (!item) return null;
+      const p = PATCHES[item.patchId];
+      const maxR = Math.max(...p.cells.map((c) => c[0])) + 1;
+      const maxC = Math.max(...p.cells.map((c) => c[1])) + 1;
+      return `Совет: возьмите №${hint.marketIndex + 1} «${p.name}» — ${p.cost} пуговиц, размер ${maxC}×${maxR}${p.income > 0 ? `, доход +${p.income}` : ''}`;
+    }
+    return `Совет: шагните вперёд — получите +${advPreview.buttonGain} пуговиц${advPreview.leathers > 0 ? ' и кожаный лоскуток' : ''}`;
+  })();
+
+  const quiltPlacing = placing
+    ? { patchId: placing.patchId, orientation: placing.orientation, r: placing.r, c: placing.c }
+    : null;
+
+  const emptyHighlight = useMemo(() => {
+    if (!leatherHuman) return null;
+    const s = new Set<number>();
+    me.board.forEach((v, i) => {
+      if (v === -1) s.add(i);
+    });
+    return s;
+  }, [leatherHuman, me.board]);
+
+  const upcoming = useMemo(() => {
+    const n = state.circle.length;
+    const out: number[] = [];
+    // ВСЕ лоскутки дальше в пути — после трёх доступных у иглы
+    for (let i = 4; i < n; i++) {
+      out.push(state.circle[(state.tokenIndex + i) % n]);
+    }
+    return out;
+  }, [state]);
+
+  const turnBanner = (() => {
+    if (state.phase === 'gameover') return 'партия завершена';
+    if (leatherHuman) return 'кожаный лоскуток: тап по клетке';
+    if (placingNow) return 'разместите лоскуток';
+    if (busy && state.activePlayer === 1) return `ход: ${persona.name}`;
+    if (myTurn) return 'ваш ход';
+    if (state.activePlayer === 1) return `ход: ${persona.name}`;
+    return '';
+  })();
+  const mySideNow = myTurn || placingNow || leatherHuman;
+
+  // ===== ПРЯМОЕ ПЕРЕТАСКИВАНИЕ С КАРТОЧКИ НА ПОЛЕ =====
+  /** координаты пальца → клетка полотна (с учётом letterbox) */
+  const cellFromClient = useCallback((clientX: number, clientY: number) => {
+    const host = boardHostRef.current;
+    if (!host) return null;
+    const rect = host.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const side = Math.min(rect.width, rect.height);
+    const offX = (rect.width - side) / 2;
+    const offY = (rect.height - side) / 2;
+    const scale = 9 / side;
+    const c = Math.floor((clientX - rect.left - offX) * scale);
+    const r = Math.floor((clientY - rect.top - offY) * scale);
+    if (r < 0 || r > 8 || c < 0 || c > 8) return null;
+    return { r, c };
+  }, []);
+
+  /** нажатие на карточку: тап — выбрать, потянуть — перетащить прямо на полотно */
+  const cardPointerDown = useCallback(
+    (e: React.PointerEvent, marketIndex: 0 | 1 | 2, patchId: number) => {
+      if (!myTurn || busy || placingNow || leatherHuman) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const check = checks.find((x) => x.m.marketIndex === marketIndex)?.check;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const suggested = suggestPlacement(state, 0, patchId);
+      const orientation = suggested?.orientation ?? 0;
+      let moved = false;
+      let ghostSet = false;
+
+      const cleanup = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', cancel);
+      };
+      const move = (ev: PointerEvent) => {
+        if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 12) return;
+        if (!moved) {
+          moved = true;
+          sound.ensure();
+        }
+        const cell = cellFromClient(ev.clientX, ev.clientY);
+        if (cell && check?.allowed) {
+          const o = orientationsFor(patchId)[orientation];
+          const r = Math.max(0, Math.min(9 - o.h, cell.r - Math.floor((o.h - 1) / 2)));
+          const c = Math.max(0, Math.min(9 - o.w, cell.c - Math.floor((o.w - 1) / 2)));
+          setPlacing({ marketIndex, patchId, orientation, r, c });
+          ghostSet = true;
+          setDragChip(null);
+        } else {
+          if (ghostSet) {
+            setPlacing(null);
+            ghostSet = false;
+          }
+          setDragChip({ x: ev.clientX, y: ev.clientY, patchId, marketIndex });
+        }
+      };
+      const up = (ev: PointerEvent) => {
+        cleanup();
+        setDragChip(null);
+        if (!moved) return; // простой тап — карточка сама вызовет onSelect
+        const cell = cellFromClient(ev.clientX, ev.clientY);
+        if (cell && ghostSet) {
+          sound.tap();
+          vibrate(10, settings.current.vibration);
+        } else if (ghostSet) {
+          setPlacing(null);
+        } else if (!check?.allowed) {
+          sound.error();
+          vibrate(50, settings.current.vibration);
+        }
+      };
+      const cancel = () => {
+        cleanup();
+        setDragChip(null);
+        if (ghostSet) setPlacing(null);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', cancel);
+    },
+    [myTurn, busy, placingNow, leatherHuman, checks, state, cellFromClient],
+  );
+
+  /** позиция плавающей панели действий (привязана к фигуре на полотне, не выходит за экран) */
+  const toolbarPos = useMemo(() => {
+    if (!placing) return null;
+    const o = orientationsFor(placing.patchId)[placing.orientation];
+    const cxPct = ((placing.c + o.w / 2) / 9) * 100;
+    const bottomPct = ((placing.r + o.h) / 9) * 100;
+    const topPct = (placing.r / 9) * 100;
+    const below = bottomPct < 62;
+    return {
+      // панель ~304px: центр клампим так, чтобы она всегда была целиком на полотне
+      left: `clamp(158px, ${cxPct}%, calc(100% - 158px))`,
+      top: below ? `calc(${bottomPct}% + 10px)` : `calc(${topPct}% - 64px)`,
+    };
+  }, [placing]);
+
+  return (
+    <div className="mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)] xl:max-w-[1200px] xl:flex-row xl:gap-6">
+      {/* ===== Игровая колонка ===== */}
+      <div className="flex min-h-0 w-full flex-col xl:w-[600px] xl:shrink-0">
+        {/* Шапка */}
+        <div className="flex items-center justify-between py-1">
+          <button
+            type="button"
+            onClick={() => {
+              sound.tap();
+              onExit();
+            }}
+            className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
+            aria-label="Выйти в меню"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-[130px] text-center leading-tight">
+            <div className="font-display text-[20px] text-foreground">Лоскутки</div>
+            {/* индикатор хода — компакт, в подзаголовке (не занимает отдельную строку) */}
+            <div
+              key={turnBanner}
+              className={`banner-in flex items-center justify-center gap-1.5 text-[11.5px] font-extrabold tracking-wide ${
+                mySideNow ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              {mySideNow && (
+                <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary shadow-sm" />
+              )}
+              <span className="truncate">{turnBanner || (state.mode === 'daily' ? `игра дня №${dailyNumber(new Date())}` : 'пэчворк-дуэль')}</span>
+            </div>
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                sound.tap();
+                setShowHint((v) => !v);
+              }}
+              className={`btn-cloth flex h-9 w-9 items-center justify-center rounded-xl ${
+                showHint ? 'bg-[#FFF7E0] ring-2 ring-[#D9A13F]' : ''
+              }`}
+              aria-label="Подсказка"
+            >
+              <Lightbulb className="h-4.5 w-4.5" fill={showHint ? '#FFD98A' : 'none'} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sound.tap();
+                onOpenRules();
+              }}
+              className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
+              aria-label="Правила"
+            >
+              <BookOpen className="h-4.5 w-4.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Панель соперницы: статы компактными значками справа от неё */}
+        <div className="stitched-card fabric-lattice flex items-center gap-1.5 px-2 py-0.5">
+          <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[3px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
+            <BotAvatar level={state.botLevel} size={38} thinking={busy && state.activePlayer === 1} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13.5px] font-extrabold text-foreground">{persona.name}</div>
+            <div className="truncate text-[10px] font-bold text-muted-foreground">{persona.difficulty}</div>
+          </div>
+          <div className="flex items-center gap-1">
+            <EnemyTile icon={<CoinIcon size={16} />} value={bot.buttons} title="Пуговицы соперника" />
+            <EnemyTile icon={<IncomeIcon size={15} />} value={`+${bot.income}`} title="Доход соперника" />
+            <EnemyTile
+              icon={<ClockIcon size={15} />}
+              value={
+                <>
+                  {bot.time}
+                  <span className="text-[9px] font-bold text-muted-foreground">/53</span>
+                </>
+              }
+              title={`Время соперника: ${bot.time} из 53`}
+            />
+            {bot.tile7x7 && (
+              <div className="pop-in flex h-9 w-7 items-center justify-center text-[14px]" title="Спецплитка 7×7">
+                🏅
+              </div>
+            )}
+          </div>
+          <Sheet open={showBotBoard} onOpenChange={setShowBotBoard}>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                className="btn-cloth flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl"
+                aria-label="Посмотреть полотно соперника"
+              >
+                <BoardFillIcon size={21} covered={bot.covered} />
+                <span className="text-[9px] font-extrabold leading-none text-foreground/80">{bot.covered}</span>
+              </button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
+                  <BotAvatar level={state.botLevel} size={32} /> {persona.name}
+                </SheetTitle>
+              </SheetHeader>
+              <div className="px-4 pb-6">
+                <MiniQuilt board={bot.board} className="w-full rounded-xl border-2 border-border" />
+                <div className="mt-3 flex justify-center gap-2">
+                  <BigStat icon={<CoinIcon size={22} />} value={bot.buttons} label="пуговицы" />
+                  <BigStat icon={<IncomeIcon size={22} />} value={bot.income} label="доход" />
+                </div>
+                {quip && (
+                  <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-center text-[13px] font-semibold italic text-muted-foreground">
+                    «{quip}»
+                  </div>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+
+        {/* Дорожка времени */}
+        <div className="mt-1">
+          <TimeTrack
+            positions={[me.time, bot.time]}
+            activePlayer={state.activePlayer}
+            onTop={state.activePlayer}
+            leatherClaimed={state.leatherClaimed}
+            popups={popups}
+            advanceHint={myTurn ? { player: 0, from: me.time, to: advanceTo } : null}
+          />
+        </div>
+
+        {/* Мои статы — НАД полотном */}
+        <div className="mt-1 flex items-center justify-center gap-1">
+          <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label="пуговицы" accent title="Ваши пуговицы" />
+          <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label="доход" title="Ваш доход с лоскутков" />
+          <BigStat icon={<ClockIcon size={16} />} value={me.time} label="из 53" title={`Ваше время: ${me.time} из 53`} />
+          <BigStat
+            icon={<BoardFillIcon size={16} covered={me.covered} />}
+            value={me.covered}
+            label="клеток"
+            title={`Заполнено клеток: ${me.covered} из 81`}
+          />
+          {me.tile7x7 && (
+            <div className="pop-in flex h-[34px] w-8 items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px]" title="Спецплитка 7×7">
+              🏅
+            </div>
+          )}
+        </div>
+
+        {/* Полотно — квадрат, вписывается в свободное место (забирает место бывшего баннера) */}
+        <div className="mt-1 flex min-h-0 flex-1 items-center justify-center">
+          <div ref={boardHostRef} className="relative aspect-square max-h-full w-full max-w-[520px]">
+            <QuiltBoard
+              board={me.board}
+              interactive={(placingNow || leatherHuman) && !busy && !dragActive}
+              placing={quiltPlacing}
+              onPlace={(r, c) => {
+                if (leatherHuman) void placeLeatherHuman(r, c);
+                else if (placing) setPlacing((p) => (p ? { ...p, r, c } : p));
+              }}
+              highlightCells={emptyHighlight}
+              flashPiece={
+                flash?.player === 0 ? { pieceId: flash.pieceId, r: flash.r, c: flash.c } : null
+              }
+              showPlacementGrid={placingNow && hintOn}
+              ghostBadges={
+                placing ? { cost: PATCHES[placing.patchId].cost, time: PATCHES[placing.patchId].time } : null
+              }
+              className="h-full w-full"
+            />
+            {leatherHuman && (
+              <div className="pointer-events-none absolute -top-1 left-1/2 z-10 flex -translate-x-1/2 -translate-y-full items-center gap-1.5 whitespace-nowrap rounded-full bg-[#7A5230] px-3 py-1 text-[12px] font-bold text-[#F2E6CD] shadow-lg">
+                <LeatherPatchIcon size={14} />
+                тапните по свободной клетке
+              </div>
+            )}
+
+            {/* Подсказка: понятная плашка с текстом совета */}
+            {hint && hintText && (
+              <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 flex w-max max-w-[96%] -translate-x-1/2 flex-col items-center">
+                <div className="flex items-center gap-2 rounded-2xl border-2 border-[#D9A13F] bg-[#FFF7E0] px-3 py-1.5 shadow-xl">
+                  <Lightbulb className="h-5 w-5 shrink-0 text-[#A6721F]" fill="#FFD98A" />
+                  <span className="text-[13px] leading-snug font-extrabold text-[#6E4E0B]">{hintText}</span>
+                </div>
+                <div className="h-0 w-0 border-x-[9px] border-t-[10px] border-x-transparent border-t-[#D9A13F]" />
+              </div>
+            )}
+
+            {/* Плавающая панель действий — прикреплена к фигуре */}
+            {placingNow && placing && toolbarPos && (
+              <div
+                className="pop-in absolute z-30 -translate-x-1/2"
+                style={{ left: toolbarPos.left, top: toolbarPos.top }}
+              >
+                <div className="flex items-center gap-1.5 rounded-2xl border-2 border-border bg-card/95 p-1.5 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.tap();
+                      setPlacing(null);
+                    }}
+                    className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                    aria-label="Отменить покупку"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.tap();
+                      vibrate(8, settings.current.vibration);
+                      setPlacing((p) => {
+                        if (!p) return p;
+                        const o = rotatedOrientation(p.patchId, p.orientation);
+                        const orient = orientationsFor(p.patchId)[o];
+                        return {
+                          ...p,
+                          orientation: o,
+                          r: Math.min(p.r, 9 - orient.h),
+                          c: Math.min(p.c, 9 - orient.w),
+                        };
+                      });
+                    }}
+                    className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                    aria-label="Повернуть"
+                  >
+                    <RotateCw className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.tap();
+                      vibrate(8, settings.current.vibration);
+                      setPlacing((p) => {
+                        if (!p) return p;
+                        const o = mirroredOrientation(p.patchId, p.orientation);
+                        const orient = orientationsFor(p.patchId)[o];
+                        return {
+                          ...p,
+                          orientation: o,
+                          r: Math.min(p.r, 9 - orient.h),
+                          c: Math.min(p.c, 9 - orient.w),
+                        };
+                      });
+                    }}
+                    className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                    aria-label="Отразить"
+                  >
+                    <FlipHorizontal className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmPlacement()}
+                    disabled={!ghostLegal}
+                    className="btn-wood flex h-11 items-center gap-1.5 rounded-full px-5 text-[15.5px] font-extrabold"
+                    aria-label="Пришить лоскуток"
+                  >
+                    <Check className="h-5 w-5" />
+                    Пришить
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Рынок: тап или перетаскивание прямо на полотно (чуть левее и ниже — по свободному месту) */}
+        <div className="mt-2.5">
+          <div
+            className={`-ml-1.5 flex gap-2 transition-opacity ${
+              placingNow && !dragActive ? 'pointer-events-none opacity-40' : 'opacity-100'
+            }`}
+          >
+            {checks.map(({ m, check }) => (
+              <div
+                key={m.marketIndex}
+                className="min-w-0 flex-1"
+                onPointerDown={(e) => cardPointerDown(e, m.marketIndex, m.patchId)}
+              >
+                <MarketCard
+                  patchId={m.patchId}
+                  index={m.marketIndex}
+                  buttons={me.buttons}
+                  placeable={check.placeable}
+                  selected={
+                    hint && hint.action === 'buy' && hint.marketIndex === m.marketIndex
+                      ? true
+                      : placing?.marketIndex === m.marketIndex
+                  }
+                  disabled={!myTurn || busy}
+                  onSelect={() => selectPatch(m.marketIndex)}
+                />
+              </div>
+            ))}
+          </div>
+          {/* Лента «дальше в пути»: все оставшиеся лоскутки круга, тап — карточка с данными */}
+          <div className="mt-1">
+            <UpcomingRibbon
+              upcoming={upcoming}
+              onSelect={(id) => {
+                sound.tap();
+                setRibbonDetail(id);
+              }}
+            />
+          </div>
+        </div>
+
+        {/* «Шагнуть вперёд»: слова → числа+часы в отдельной плашке · пуговицы */}
+        <button
+          type="button"
+          onClick={doAdvance}
+          disabled={!myTurn || busy}
+          className={`btn-wood mt-1 flex h-12 w-full items-center justify-between gap-2 rounded-xl px-3 ${
+            forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
+          } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
+          aria-label={`Шагнуть вперёд с ${me.time} на ${advanceTo}: получить ${advPreview.buttonGain} пуговиц`}
+        >
+          <span className="flex min-w-0 items-center gap-1.5">
+            <ChevronsRight className="h-5 w-5 shrink-0" />
+            <span className="shrink-0 text-[14.5px] font-extrabold">Шагнуть вперёд</span>
+            {/* числа и значок времени — в заметной тёмной плашке, не сливаются с кнопкой */}
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#3F2A14]/35 px-2 py-1 shadow-[inset_0_1px_2px_rgba(0,0,0,.25)]">
+              <span className="tabular-nums text-[14px] leading-none font-extrabold">{me.time}</span>
+              <ArrowRight className="h-4.5 w-4.5 shrink-0" strokeWidth={3.4} />
+              <span className="tabular-nums text-[14px] leading-none font-extrabold">{advanceTo}</span>
+              <ClockIcon size={14} />
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-[15px] font-extrabold">
+            <span className="tabular-nums">+{advPreview.buttonGain}</span>
+            <CoinIcon size={17} />
+            {advPreview.leathers > 0 && (
+              <span className="ml-1 flex items-center gap-1 rounded-full bg-[#7A5230]/70 px-1.5 py-0.5 text-[10px] font-bold text-[#F2E6CD]">
+                +кожаный
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
+
+      {/* Хроника (десктоп) */}
+      <aside className="hidden w-[300px] flex-col gap-2 xl:flex">
+        <div className="stitched-card mt-1.5 max-h-[45vh] flex-1 overflow-y-auto p-3">
+          <div className="mb-1 text-[11px] font-extrabold tracking-wide text-muted-foreground uppercase">
+            Хроника партии
+          </div>
+          {[...state.log].reverse().slice(0, 16).map((l, i) => (
+            <div
+              key={i}
+              className={`text-[12.5px] font-semibold ${l.player === 0 ? 'text-foreground' : 'text-muted-foreground'}`}
+            >
+              {l.text}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* Карточка лоскутка из ленты «дальше в пути» */}
+      {ribbonDetail !== null && (
+        <PatchDetailPopup patchId={ribbonDetail} onClose={() => setRibbonDetail(null)} />
+      )}
+
+      {/* Чип перетаскивания — следует за пальцем вне полотна */}
+      {dragChip && (
+        <div
+          className="pointer-events-none fixed z-50 select-none"
+          style={{ left: dragChip.x, top: dragChip.y, transform: 'translate(-50%, -50%)' }}
+        >
+          <div className="relative">
+            <div className="flex h-[70px] w-[70px] items-center justify-center rounded-2xl border-2 border-[#A9855A]/50 bg-card/90 shadow-xl">
+              <DragGlyph patchId={dragChip.patchId} />
+            </div>
+            <div className="absolute -top-1 -right-1 flex flex-col items-end gap-1">
+              <BadgePill icon={<CoinIcon size={12} />} value={PATCHES[dragChip.patchId].cost} />
+              <BadgePill icon={<ClockIcon size={12} />} value={PATCHES[dragChip.patchId].time} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Финал */}
+      {state.phase === 'gameover' && endedShown && (
+        <EndScreen
+          state={state}
+          onRematch={() => {
+            sound.tap();
+            onRematch();
+          }}
+          onHome={() => {
+            sound.tap();
+            onExit();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Компактная вертикальная плитка показателя соперницы */
+function EnemyTile({ icon, value, title }: { icon: React.ReactNode; value: React.ReactNode; title: string }) {
+  return (
+    <div
+      className="flex min-w-[30px] flex-col items-center gap-0.5 rounded-lg border border-border bg-card/85 px-1 py-0.5"
+      title={title}
+    >
+      <span className="flex h-[15px] items-center justify-center">{icon}</span>
+      <span className="flex h-[13px] items-center text-[12px] leading-none font-extrabold text-foreground">{value}</span>
+    </div>
+  );
+}
+
+/** Мини-глиф лоскутка для чипа перетаскивания */
+function DragGlyph({ patchId }: { patchId: number }) {
+  const patch = PATCHES[patchId];
+  const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
+  const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
+  const maxDim = Math.max(maxR, maxC);
+  const size = Math.min(56, 15 + maxDim * 9);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${maxDim} ${maxDim}`} aria-hidden>
+      <g transform={`translate(${(maxDim - maxC) / 2} ${(maxDim - maxR) / 2 - 0.2})`}>
+        <GlyphDirect patchId={patchId} />
+      </g>
+    </svg>
+  );
+}

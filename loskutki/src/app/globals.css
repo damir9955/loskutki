@@ -1,0 +1,304 @@
+@import "./fonts.css";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: ui-monospace, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 1rem;
+  --font-body: 'Nunito';
+  --font-display: 'Yeseva One';
+  --background: #F3E9D2;
+  --foreground: #3E2F23;
+  --card: #FBF4E2;
+  --card-foreground: #3E2F23;
+  --popover: #FBF4E2;
+  --popover-foreground: #3E2F23;
+  --primary: #C0603A;
+  --primary-foreground: #FDF8EC;
+  --secondary: #EADFC4;
+  --secondary-foreground: #3E2F23;
+  --muted: #E9DFC6;
+  --muted-foreground: #8A7358;
+  --accent: #E4D5B4;
+  --accent-foreground: #3E2F23;
+  --destructive: #B5432F;
+  --border: #D9C9A3;
+  --input: #D9C9A3;
+  --ring: #C0603A;
+  --chart-1: #C0603A;
+  --chart-2: #3E7C74;
+  --chart-3: #D9A13F;
+  --chart-4: #8E5A79;
+  --chart-5: #8AA06F;
+  --sidebar: #FBF4E2;
+  --sidebar-foreground: #3E2F23;
+  --sidebar-primary: #C0603A;
+  --sidebar-primary-foreground: #FDF8EC;
+  --sidebar-accent: #E4D5B4;
+  --sidebar-accent-foreground: #3E2F23;
+  --sidebar-border: #D9C9A3;
+  --sidebar-ring: #C0603A;
+}
+
+.dark {
+  --background: #2B2118;
+  --foreground: #F3E9D2;
+  --card: #352A1F;
+  --card-foreground: #F3E9D2;
+  --popover: #352A1F;
+  --popover-foreground: #F3E9D2;
+  --primary: #D2724A;
+  --primary-foreground: #FDF8EC;
+  --secondary: #453927;
+  --secondary-foreground: #F3E9D2;
+  --muted: #453927;
+  --muted-foreground: #C4AF90;
+  --accent: #4A3D2C;
+  --accent-foreground: #F3E9D2;
+  --destructive: #C25542;
+  --border: #4A3D2C;
+  --input: #4A3D2C;
+  --ring: #D2724A;
+  --chart-1: #D2724A;
+  --chart-2: #4E948B;
+  --chart-3: #E0B052;
+  --chart-4: #A06C8E;
+  --chart-5: #9BB07F;
+  --sidebar: #352A1F;
+  --sidebar-foreground: #F3E9D2;
+  --sidebar-primary: #D2724A;
+  --sidebar-primary-foreground: #FDF8EC;
+  --sidebar-accent: #4A3D2C;
+  --sidebar-accent-foreground: #F3E9D2;
+  --sidebar-border: #4A3D2C;
+  --sidebar-ring: #D2724A;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body), system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  ::selection {
+    background: #EBC7B2;
+  }
+}
+
+/* ===== Текстильная тема «Лоскутки» ===== */
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+/* льняной фон с плетением */
+.linen-bg {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(rgba(120, 90, 50, 0.055) 1px, transparent 1.4px),
+    radial-gradient(rgba(120, 90, 50, 0.035) 1px, transparent 1.4px);
+  background-size: 22px 22px, 22px 22px;
+  background-position: 0 0, 11px 11px;
+}
+
+/* «стёганая» карточка — рамка-стёжка */
+.stitched-card {
+  position: relative;
+  background: var(--card);
+  border-radius: 1.25rem;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -3px 0 rgba(120, 90, 50, 0.09),
+    0 6px 16px -8px rgba(80, 55, 30, 0.35);
+  border: 2px solid rgba(120, 90, 50, 0.22);
+}
+.stitched-card::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 1rem;
+  border: 2px dashed rgba(139, 94, 60, 0.35);
+  pointer-events: none;
+}
+
+/* деревянная пуговица-кнопка */
+.btn-wood {
+  background: linear-gradient(180deg, #C9744E 0%, #B25A34 55%, #9A4826 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -3px 0 rgba(90, 40, 18, 0.45),
+    0 4px 10px -3px rgba(90, 45, 20, 0.55);
+  border: 1.5px solid #8A3E20;
+  color: #FDF3E0;
+  text-shadow: 0 1px 0 rgba(120, 50, 20, 0.5);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+.btn-wood:active:not(:disabled) {
+  transform: translateY(1.5px) scale(0.985);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -2px 0 rgba(90, 40, 18, 0.4),
+    0 2px 5px -2px rgba(90, 45, 20, 0.5);
+}
+.btn-wood:disabled {
+  filter: grayscale(0.45) brightness(0.9);
+  opacity: 0.65;
+}
+
+/* вторичная «тканевая» кнопка */
+.btn-cloth {
+  background: linear-gradient(180deg, #EFE4C8 0%, #E3D5B2 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -2px 0 rgba(120, 90, 50, 0.16),
+    0 3px 8px -3px rgba(80, 55, 30, 0.3);
+  border: 1.5px solid rgba(120, 90, 50, 0.35);
+  color: #3E2F23;
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+.btn-cloth:active:not(:disabled) {
+  transform: translateY(1.5px) scale(0.985);
+}
+
+/* ===== Анимации ===== */
+
+@keyframes popup-float {
+  0% { transform: translateY(6px) scale(0.7); opacity: 0; }
+  25% { transform: translateY(0) scale(1.08); opacity: 1; }
+  60% { transform: translateY(-10px) scale(1); opacity: 1; }
+  100% { transform: translateY(-30px) scale(0.9); opacity: 0; }
+}
+.track-popup {
+  animation: popup-float 1.6s ease-out forwards;
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0.55); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop-in { animation: pop-in 380ms cubic-bezier(.22,1.2,.36,1) both; }
+
+@keyframes piece-drop {
+  0% { transform: scale(1.5); opacity: 0; }
+  65% { transform: scale(0.96); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.piece-drop { animation: piece-drop 420ms cubic-bezier(.2,1.1,.3,1) both; transform-box: fill-box; transform-origin: center; }
+
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.soft-pulse { animation: soft-pulse 1.4s ease-in-out infinite; }
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+.shake { animation: shake-x 320ms ease; }
+
+@keyframes banner-in {
+  0% { transform: translateY(-14px) scale(0.9); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.banner-in { animation: banner-in 320ms cubic-bezier(.2,1.1,.3,1) both; }
+
+/* мягкое «дыхание» баннера вашего хода */
+@keyframes banner-glow {
+  0%, 100% { box-shadow: 0 4px 14px -6px rgba(120, 45, 15, 0.55), 0 0 0 0 rgba(192, 96, 58, 0.45); }
+  50% { box-shadow: 0 4px 20px -4px rgba(120, 45, 15, 0.7), 0 0 0 7px rgba(192, 96, 58, 0); }
+}
+.banner-glow { animation: banner-glow 1.8s ease-in-out infinite; }
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0.85; }
+}
+.confetti-piece {
+  position: absolute;
+  width: 10px;
+  height: 16px;
+  border-radius: 3px;
+  animation: confetti-fall linear forwards;
+}
+
+@keyframes think-dots {
+  0%, 20% { content: '·'; }
+  40% { content: '· ·'; }
+  60%, 100% { content: '· · ·'; }
+}
+
+/* аккуратный скроллбар для длинных списков */
+.nice-scroll::-webkit-scrollbar { width: 6px; }
+.nice-scroll::-webkit-scrollbar-thumb { background: #C9B58C; border-radius: 6px; }
+.nice-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* лента «дальше в пути»: горизонтальный скролл без полосы прокрутки */
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.hide-scrollbar::-webkit-scrollbar { display: none; height: 0; width: 0; }
+
+/* стёжка-заголовок */
+.stitch-divider {
+  height: 0;
+  border-top: 3px dashed rgba(139, 94, 60, 0.4);
+}
+
+/* тканевая решётка-ромбы для панелей (зона соперника и т.п.) */
+.fabric-lattice {
+  background-image:
+    repeating-linear-gradient(45deg, rgba(169, 133, 90, 0.13) 0 5px, transparent 5px 11px),
+    repeating-linear-gradient(-45deg, rgba(169, 133, 90, 0.10) 0 5px, transparent 5px 11px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-popup, .pop-in, .piece-drop, .banner-in, .banner-glow, .confetti-piece { animation-duration: 0.01s !important; }
+}
