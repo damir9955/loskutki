@@ -1,6 +1,7 @@
 'use client';
 
 import { INCOME_MARKERS, LEATHER_POS, TIME_END } from '@/lib/game/constants';
+import { t } from '@/lib/i18n';
 
 const CELL = 34;
 const TOP_Y = 36;
@@ -29,6 +30,7 @@ export function TimeTrack({
   positions,
   activePlayer,
   onTop,
+  labels = ['В', 'С'],
   leatherClaimed,
   popups = [],
   advanceHint = null,
@@ -36,18 +38,21 @@ export function TimeTrack({
 }: {
   positions: [number, number];
   activePlayer: number;
-  /** кто «сверху» при равенстве (обычно — активный) */
+  /** кто «сверху» при равенстве — вставшая точно на клетку соперника (она и ходит ещё раз) */
   onTop: number;
+  /** буковки на булавках: [игрок 0, игрок 1] */
+  labels?: [string, string];
   leatherClaimed: number;
   popups?: TrackPopup[];
   advanceHint?: { player: number; from: number; to: number } | null;
   playerColors?: [string, string];
 }) {
+  // язык читается в t() при каждом ререндере; TimeTrack перерисовывается родителем
   const ribbon = `M 24 ${TOP_Y} H ${W - 34} A 30 30 0 0 1 ${W - 4} ${TOP_Y + 30} A 30 30 0 0 1 ${W - 34} ${BOT_Y} H 24`;
 
   const sameCell = positions[0] === positions[1];
 
-  const pawn = (player: number, dx: number, top: boolean) => {
+  const pawn = (player: number, dy: number, big: boolean) => {
     const { x, y } = trackXY(positions[player]);
     const color = playerColors[player];
     const isActive = activePlayer === player;
@@ -55,15 +60,26 @@ export function TimeTrack({
       <g
         key={`pawn${player}`}
         style={{
-          transform: `translate(${x + dx}px, ${y}px)`,
+          transform: `translate(${x}px, ${y + dy}px)`,
           transition: 'transform 420ms cubic-bezier(.22,.9,.36,1.2)',
         }}
       >
         {/* игла-булавка */}
         <line x1="0" y1="-6" x2="0" y2="26" stroke="#6b5540" strokeWidth="3" strokeLinecap="round" />
-        {/* головка-шляпка */}
-        <circle cx="0" cy="-12" r={top ? 13 : 11} fill={color} stroke="#fff" strokeWidth={top ? 3 : 2} />
-        <circle cx="-4" cy="-16" r="3.5" fill="#ffffff" opacity="0.55" />
+        {/* головка-шляпка с буковкой игрока */}
+        <circle cx="0" cy="-12" r={big ? 13 : 11} fill={color} stroke="#fff" strokeWidth={big ? 3 : 2} />
+        <text
+          x="0"
+          y="-12"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={big ? 11.5 : 10}
+          fontWeight="800"
+          fill="#FFFDF4"
+        >
+          {labels[player]}
+        </text>
+        <circle cx="-5.5" cy="-17.5" r="2.4" fill="#ffffff" opacity="0.5" />
         {isActive && (
           <circle cx="0" cy="-12" r="19" fill="none" stroke={color} strokeWidth="2.5" opacity="0.5">
             <animate attributeName="r" values="15;20;15" dur="1.6s" repeatCount="indefinite" />
@@ -79,7 +95,7 @@ export function TimeTrack({
       viewBox={`-6 -12 ${W + 12} 158`}
       style={{ display: 'block', width: '100%', height: 'auto' }}
       role="img"
-      aria-label="Дорожка времени"
+      aria-label={t('t_aria')}
     >
       {/* лента */}
       <path d={ribbon} fill="none" stroke="#E7D3B0" strokeWidth="60" strokeLinecap="round" />
@@ -138,15 +154,16 @@ export function TimeTrack({
 
       {/* старт/финиш */}
       <text x="2" y={TOP_Y - 24} fontSize="13" fill="#8a6b46" fontWeight="700" letterSpacing="1">
-        СТАРТ
+        {t('t_start')}
       </text>
       <text x="2" y={BOT_Y + 34} fontSize="13" fill="#8a6b46" fontWeight="700" letterSpacing="1">
-        ФИНИШ
+        {t('t_finish')}
       </text>
 
-      {/* фишки-булавки */}
+      {/* фишки-булавки: при равенстве «верхняя» (вставшая на клетку соперника)
+          рисуется ПОЗЖЕ и ВЫШЕ — её буковка оказывается над другой */}
       {sameCell
-        ? [0, 1].map((p) => pawn(p, p === onTop ? 10 : -10, p === onTop))
+        ? [1 - onTop, onTop].map((p) => pawn(p, p === onTop ? -11 : 7, p === onTop))
         : [0, 1].map((p) => pawn(p, 0, p === onTop))}
 
       {/* всплывашки событий */}

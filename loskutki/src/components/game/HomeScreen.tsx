@@ -23,6 +23,17 @@ import {
   type StatsStore,
 } from '@/lib/storage';
 import { dailyNumber } from '@/lib/game/rng';
+import {
+  achDesc,
+  achTitle,
+  personaDifficulty,
+  personaName,
+  personaTitle,
+  t,
+  useDocumentTitle,
+  useLang,
+  type Lang,
+} from '@/lib/i18n';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 import { MiniQuilt } from './QuiltBoard';
@@ -93,6 +104,9 @@ export interface HomeScreenProps {
 
 export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScreenProps) {
   const { toast } = useToast();
+  const lang = useLang();
+  // заголовок вкладки — на языке интерфейса («Лоскутки» / «Patchwork»)
+  useDocumentTitle();
   const [pickOpen, setPickOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -110,10 +124,10 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
         <LogoMark size={104} />
       </div>
       <h1 className="font-display mt-2 text-[46px] leading-none text-foreground" style={{ letterSpacing: '0.04em' }}>
-        Лоскутки
+        {t('app_title')}
       </h1>
       <p className="mt-1.5 text-[15px] font-bold tracking-wide text-muted-foreground">
-        пэчворк-дуэль на скорость иголки
+        {t('app_subtitle')}
       </p>
 
       <FabricSwatchRow />
@@ -135,9 +149,9 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
             <MiniQuilt board={resumeGame.players[0].board} className="w-full rounded-md border border-border" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[16px] font-extrabold text-foreground">Продолжить партию</div>
+            <div className="text-[16px] font-extrabold text-foreground">{t('home_resume')}</div>
             <div className="text-[12.5px] font-semibold text-muted-foreground">
-              против {BOT_PERSONAS[resumeGame.botLevel].name} · ход {resumeGame.turn + 1}
+              {t('home_resume_vs', { name: personaName(lang, resumeGame.botLevel), n: resumeGame.turn + 1 })}
             </div>
           </div>
           <RotateCcw className="h-5 w-5 shrink-0 text-primary" />
@@ -155,7 +169,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
         }}
       >
         <Play className="mr-2 h-5 w-5" />
-        Играть
+        {t('home_play')}
       </Button>
 
       <button
@@ -165,8 +179,11 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
           sound.tap();
           if (daily) {
             toast({
-              title: 'Сегодня вы уже шили 🧶',
-              description: `Итог: ${daily.won ? 'победа' : 'поражение'} (${daily.score > 0 ? '+' : ''}${daily.score}). Новая игра дня — завтра!`,
+              title: t('home_daily_done_t'),
+              description: t('home_daily_done_d', {
+                res: daily.won ? t('win') : t('loss'),
+                score: `${daily.score > 0 ? '+' : ''}${daily.score}`,
+              }),
             });
             return;
           }
@@ -183,24 +200,27 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[16px] font-extrabold text-foreground">
-            Игра дня №{dailyNumber(new Date())}
+            {t('home_daily', { n: dailyNumber(new Date()) })}
             <Sparkles className="h-3.5 w-3.5 text-[#A6721F]" />
           </div>
           <div className="text-[12.5px] font-semibold text-muted-foreground">
             {daily
-              ? `сыграно: ${daily.won ? 'победа' : 'поражение'} (${daily.score > 0 ? '+' : ''}${daily.score})`
-              : 'у всех одинаковая раскладка · соперник: Мастер Фёдор'}
+              ? t('home_daily_played', {
+                  res: daily.won ? t('win') : t('loss'),
+                  score: `${daily.score > 0 ? '+' : ''}${daily.score}`,
+                })
+              : t('home_daily_desc', { name: personaName(lang, 'fedor') })}
           </div>
         </div>
       </button>
 
       {/* Нижний ряд */}
       <div className="mt-4 grid w-full grid-cols-3 gap-2.5">
-        <MenuTile icon={<BookOpen className="h-6 w-6" />} label="Правила" onClick={onOpenRules} />
+        <MenuTile icon={<BookOpen className="h-6 w-6" />} label={t('home_rules')} onClick={onOpenRules} />
         <MenuTile
           icon={<BarChart3 className="h-6 w-6" />}
-          label="Статистика"
-          badge={s ? (s.games > 0 ? `${s.wins}П` : undefined) : undefined}
+          label={t('home_stats')}
+          badge={s ? (s.games > 0 ? `${s.wins}${t('win')[0].toUpperCase()}` : undefined) : undefined}
           onClick={() => {
             sound.tap();
             setStatsOpen(true);
@@ -208,7 +228,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
         />
         <MenuTile
           icon={<Settings2 className="h-6 w-6" />}
-          label="Настройки"
+          label={t('home_settings')}
           onClick={() => {
             sound.tap();
             setSettingsOpen(true);
@@ -218,11 +238,11 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
 
       <div className="flex-1" />
 
-      {/* ===== Выбор соперницы ===== */}
+      {/* ===== Выбор соперника ===== */}
       <Dialog open={pickOpen} onOpenChange={setPickOpen}>
         <DialogContent aria-describedby={undefined} className="w-[min(94vw,440px)]">
           <DialogHeader>
-            <DialogTitle className="font-display text-[22px]">Выберите соперника</DialogTitle>
+            <DialogTitle className="font-display text-[22px]">{t('pick_title')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2.5">
             {(Object.keys(BOT_PERSONAS) as BotLevel[]).map((lvl) => {
@@ -241,11 +261,15 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
                 >
                   <BotAvatar level={lvl} size={62} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[16.5px] font-extrabold text-foreground">{p.name}</div>
-                    <div className="text-[12.5px] font-semibold text-muted-foreground">{p.title}</div>
+                    <div className="text-[16.5px] font-extrabold text-foreground">{personaName(lang, lvl)}</div>
+                    <div className="text-[12.5px] font-semibold text-muted-foreground">{personaTitle(lang, lvl)}</div>
                     {stat && stat.games > 0 && (
                       <div className="mt-0.5 text-[12px] font-bold text-primary">
-                        побед: {stat.wins} из {stat.games} ({Math.round((stat.wins / stat.games) * 100)}%)
+                        {t('pick_wins', {
+                          w: stat.wins,
+                          g: stat.games,
+                          p: Math.round((stat.wins / stat.games) * 100),
+                        })}
                       </div>
                     )}
                   </div>
@@ -258,7 +282,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScre
                           : 'bg-[#8E5A79]/25 text-[#6E3B5E]'
                     }`}
                   >
-                    {p.difficulty}
+                    {personaDifficulty(lang, lvl)}
                   </span>
                 </button>
               );
@@ -315,6 +339,7 @@ function StatsDialog({
   onOpenChange: (v: boolean) => void;
   store: StatsStore;
 }) {
+  const lang = useLang();
   const s = store.stats;
   const winrate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
   const avgCov = s.games > 0 ? Math.round(s.totalCoverage / s.games) : 0;
@@ -323,20 +348,20 @@ function StatsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined} className="max-h-[88svh] w-[min(94vw,520px)] overflow-y-auto nice-scroll">
         <DialogHeader>
-          <DialogTitle className="font-display text-[22px]">Статистика</DialogTitle>
+          <DialogTitle className="font-display text-[22px]">{t('stats_title')}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <BigStat value={s.games} label="партий" />
-          <BigStat value={`${winrate}%`} label="побед" />
-          <BigStat value={s.bestScore > -1000 ? s.bestScore : '—'} label="лучший счёт" />
-          <BigStat value={s.bestStreak} label="серия побед" />
-          <BigStat value={`${avgCov}/81`} label="ср. покрытие" />
-          <BigStat value={s.bestCoverage} label="макс. покрытие" />
-          <BigStat value={s.wins} label="всего побед" />
-          <BigStat value={s.leatherMax} label="макс. кожаных" />
+          <BigStat value={s.games} label={t('stats_games')} />
+          <BigStat value={`${winrate}%`} label={t('stats_wr')} />
+          <BigStat value={s.bestScore > -1000 ? s.bestScore : '—'} label={t('stats_best')} />
+          <BigStat value={s.bestStreak} label={t('stats_streak')} />
+          <BigStat value={`${avgCov}/81`} label={t('stats_avg_cov')} />
+          <BigStat value={s.bestCoverage} label={t('stats_max_cov')} />
+          <BigStat value={s.wins} label={t('stats_wins_total')} />
+          <BigStat value={s.leatherMax} label={t('stats_leather')} />
         </div>
         <div className="stitch-divider my-2" />
-        <h3 className="font-display text-[18px]">Достижения</h3>
+        <h3 className="font-display text-[18px]">{t('stats_ach')}</h3>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {ACHIEVEMENTS.map((a) => {
             const got = !!store.achievements[a.id];
@@ -346,14 +371,14 @@ function StatsDialog({
                 className={`flex items-center gap-2 rounded-xl border p-2 ${
                   got ? 'border-[#D9A13F]/60 bg-[#D9A13F]/10' : 'border-border bg-muted/40 opacity-60'
                 }`}
-                title={a.description}
+                title={achDesc(lang, a.id)}
               >
                 <span className="text-[20px] grayscale-[--tw-grayscale]" style={{ filter: got ? undefined : 'grayscale(1)' }}>
                   {a.icon}
                 </span>
                 <div className="min-w-0">
-                  <div className="truncate text-[13px] font-extrabold">{a.title}</div>
-                  <div className="truncate text-[11px] font-semibold text-muted-foreground">{a.description}</div>
+                  <div className="truncate text-[13px] font-extrabold">{achTitle(lang, a.id)}</div>
+                  <div className="truncate text-[11px] font-semibold text-muted-foreground">{achDesc(lang, a.id)}</div>
                 </div>
               </div>
             );
@@ -362,7 +387,7 @@ function StatsDialog({
         {dailyKeys.length > 0 && (
           <>
             <div className="stitch-divider my-2" />
-            <h3 className="font-display text-[18px]">Игры дня</h3>
+            <h3 className="font-display text-[18px]">{t('stats_daily')}</h3>
             <div className="space-y-1">
               {dailyKeys.map((k) => {
                 const d = store.daily[k];
@@ -370,7 +395,7 @@ function StatsDialog({
                   <div key={k} className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-1.5 text-[13px] font-bold">
                     <span>{k}</span>
                     <span className={d.won ? 'text-primary' : 'text-destructive'}>
-                      {d.won ? 'победа' : 'поражение'} · {d.score > 0 ? '+' : ''}
+                      {d.won ? t('win') : t('loss')} · {d.score > 0 ? '+' : ''}
                       {d.score}
                     </span>
                   </div>
@@ -401,6 +426,7 @@ function SettingsDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const { toast } = useToast();
+  const lang = useLang();
   const [st, setSt] = useState(() => loadStore().settings);
   const save = (patch: Partial<typeof st>) => {
     const next = { ...st, ...patch };
@@ -410,16 +436,22 @@ function SettingsDialog({
     saveStore(store);
     sound.enabled = next.sound;
   };
+  const setLang = (l: Lang) => {
+    if (l === lang) return;
+    sound.ensure();
+    sound.tap();
+    save({ lang: l });
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined} className="w-[min(94vw,420px)]">
         <DialogHeader>
-          <DialogTitle className="font-display text-[22px]">Настройки</DialogTitle>
+          <DialogTitle className="font-display text-[22px]">{t('set_title')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <SettingRow
-            label="Звук"
-            hint="стежки, пуговицы, победы"
+            label={t('set_sound')}
+            hint={t('set_sound_h')}
             checked={st.sound}
             onChange={(v) => {
               save({ sound: v });
@@ -430,31 +462,60 @@ function SettingsDialog({
             }}
           />
           <SettingRow
-            label="Вибрация"
-            hint="отклик на пришивание"
+            label={t('set_vibro')}
+            hint={t('set_vibro_h')}
             checked={st.vibration}
             onChange={(v) => save({ vibration: v })}
           />
           <SettingRow
-            label="Сетка мест"
-            hint="подсветка допустимых позиций при размещении"
+            label={t('set_grid')}
+            hint={t('set_grid_h')}
             checked={st.hints}
             onChange={(v) => save({ hints: v })}
           />
+          {/* Язык: русский (по умолчанию) / английский */}
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[15.5px] font-extrabold">{t('set_lang')}</div>
+              <div className="text-[12.5px] font-semibold text-muted-foreground">{t('set_lang_h')}</div>
+            </div>
+            <div className="flex overflow-hidden rounded-xl border-2 border-border shadow-sm">
+              <button
+                type="button"
+                onClick={() => setLang('ru')}
+                aria-pressed={lang === 'ru'}
+                className={`px-3 py-2 text-[13px] font-extrabold transition-colors ${
+                  lang === 'ru' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground/70 hover:bg-muted'
+                }`}
+              >
+                Русский
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang('en')}
+                aria-pressed={lang === 'en'}
+                className={`px-3 py-2 text-[13px] font-extrabold transition-colors ${
+                  lang === 'en' ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground/70 hover:bg-muted'
+                }`}
+              >
+                English
+              </button>
+            </div>
+          </div>
           <div className="stitch-divider my-1" />
           <button
             type="button"
             className="w-full rounded-xl border-2 border-destructive/40 bg-destructive/8 py-2.5 text-[14.5px] font-extrabold text-destructive"
             onClick={() => {
-              if (confirm('Стереть всю статистику, достижения и сохранённую партию?')) {
+              if (confirm(t('set_reset_confirm'))) {
                 localStorage.removeItem('loskutki.v1');
                 sound.enabled = true;
                 setSt(loadStore().settings);
-                toast({ title: 'Прогресс сброшен', description: 'Чистый лист — новая ткань!' });
+                toast({ title: t('set_reset_done'), description: t('set_reset_done_h') });
               }
             }}
           >
-            Сбросить прогресс
+            {t('set_reset')}
           </button>
         </div>
       </DialogContent>

@@ -1,6 +1,7 @@
 'use client';
 
 import type { BotLevel } from './game/constants';
+import type { Lang } from './i18n';
 import type { GameState, GameResult } from './game/types';
 import { dailySeed, dailyNumber } from './game/rng';
 
@@ -18,6 +19,8 @@ export interface StatsStore {
     sound: boolean;
     vibration: boolean;
     hints: boolean;
+    /** язык интерфейса — русский по умолчанию */
+    lang: Lang;
   };
   stats: {
     games: number;
@@ -37,7 +40,7 @@ export interface StatsStore {
 }
 
 export const DEFAULT_STORE: StatsStore = {
-  settings: { sound: true, vibration: true, hints: true },
+  settings: { sound: true, vibration: true, hints: true, lang: 'ru' },
   stats: {
     games: 0,
     wins: 0,
@@ -132,24 +135,22 @@ export function notifyStoreChanged() {
 
 export interface Achievement {
   id: string;
-  title: string;
-  description: string;
-  icon: string; // emoji-иконка
+  icon: string; // emoji-иконка; название и описание — в i18n (achTitle/achDesc)
 }
 
 export const ACHIEVEMENTS: Achievement[] = [
-  { id: 'first-win', title: 'Первая победа', description: 'Выиграть первую партию', icon: '🧵' },
-  { id: 'games-5', title: 'Ученица', description: 'Сыграть 5 партий', icon: '🪡' },
-  { id: 'games-25', title: 'Мастерица', description: 'Сыграть 25 партий', icon: '🧶' },
-  { id: 'tile7x7', title: 'Золотая нашивка', description: 'Получить спецплитку 7×7', icon: '🏅' },
-  { id: 'full-quilt', title: 'Полное полотно', description: 'Закрыть 78+ из 81 клетки', icon: '✨' },
-  { id: 'big-score', title: 'Идеальный шов', description: 'Выиграть со счётом 30+', icon: '💎' },
-  { id: 'rich', title: 'Богиня пуговиц', description: 'Завершить партию с 20+ пуговицами', icon: '🪙' },
-  { id: 'beat-elza', title: 'Скорняк', description: 'Победить Кутюрье Эльзу', icon: '👑' },
-  { id: 'streak-3', title: 'Хет-трик', description: 'Три победы подряд', icon: '🔥' },
-  { id: 'daily-win', title: 'Идеальный день', description: 'Победить в Игре дня', icon: '📅' },
-  { id: 'leather-5', title: 'Кожаная классика', description: 'Зашить все 5 кожаных лоскутков за партию', icon: '🥾' },
-  { id: 'wins-10', title: 'Дуэлянт', description: 'Выиграть 10 партий', icon: '⚔️' },
+  { id: 'first-win', icon: '🧵' },
+  { id: 'games-5', icon: '🪡' },
+  { id: 'games-25', icon: '🧶' },
+  { id: 'tile7x7', icon: '🏅' },
+  { id: 'full-quilt', icon: '✨' },
+  { id: 'big-score', icon: '💎' },
+  { id: 'rich', icon: '🪙' },
+  { id: 'beat-elza', icon: '👑' },
+  { id: 'streak-3', icon: '🔥' },
+  { id: 'daily-win', icon: '📅' },
+  { id: 'leather-5', icon: '🥾' },
+  { id: 'wins-10', icon: '⚔️' },
 ];
 
 export interface GameSummary {
@@ -220,7 +221,7 @@ export function recordGame(store: StatsStore, summary: GameSummary): {
   return { store: next, unlocked };
 }
 
-/** Текст результата для «поделиться» */
+/** Текст результата для «поделиться» (не используется в UI, оставлен для будущего) */
 export function shareText(state: GameState): string {
   const r = state.result;
   if (!r) return '';

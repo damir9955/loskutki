@@ -3,6 +3,7 @@
 import { PATCHES, BOT_PERSONAS, type BotLevel, LEATHER_ID, LEATHER_PATCH } from '@/lib/game/constants';
 import type { AvailablePatch } from '@/lib/game/engine';
 import type { AdvancePreview } from '@/lib/game/engine';
+import { patchName, t, useLang } from '@/lib/i18n';
 
 /** Пуговица-иконка (валюта) */
 export function CoinIcon({ size = 18, className }: { size?: number; className?: string }) {
@@ -18,14 +19,57 @@ export function CoinIcon({ size = 18, className }: { size?: number; className?: 
   );
 }
 
-/** Часики со стрелками (время) — читаются даже в 12px */
+/** Песочные часы (время/ходы) — читаются даже в 12px */
 export function ClockIcon({ size = 18, className }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="9.6" fill="#F1E6CC" stroke="#A9855A" strokeWidth="1.8" />
-      <path d="M 6.8 12 A 5.2 5.2 0 0 1 12 6.8" stroke="#ffffff" strokeWidth="1.3" fill="none" opacity="0.75" strokeLinecap="round" />
-      <path d="M12 7.4 V12 L15.6 14.2" stroke="#6E4E0B" strokeWidth="2.1" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="1.15" fill="#6E4E0B" />
+      {/* стеклянные колбы */}
+      <path
+        d="M6.8 4.2 C6.8 8.6 10.6 10 11 12 C10.6 14 6.8 15.4 6.8 19.8 L17.2 19.8 C17.2 15.4 13.4 14 13 12 C13.4 10 17.2 8.6 17.2 4.2 Z"
+        fill="#F1E6CC"
+        stroke="#A9855A"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      {/* деревянная рама */}
+      <rect x="4.9" y="1.6" width="14.2" height="3.1" rx="1.55" fill="#8B5E3C" stroke="#5B3B20" strokeWidth="0.7" />
+      <rect x="4.9" y="19.3" width="14.2" height="3.1" rx="1.55" fill="#8B5E3C" stroke="#5B3B20" strokeWidth="0.7" />
+      {/* песок: горка сверху + струя + горка снизу */}
+      <path d="M9.1 6.1 C9.5 8.1 10.7 9.2 11.7 9.9 L12.3 9.9 C13.3 9.2 14.5 8.1 14.9 6.1 Z" fill="#E2B24E" />
+      <path d="M12 10.6 V16.2" stroke="#D9A13F" strokeWidth="1.15" strokeLinecap="round" />
+      <path d="M8.3 18.6 C8.9 15.9 10.9 14.4 12 13.6 C13.1 14.4 15.1 15.9 15.7 18.6 Z" fill="#D9A13F" />
+      {/* блик стекла */}
+      <path d="M 8.1 6.2 C 8.3 7.8 9.2 8.8 10 9.5" stroke="#ffffff" strokeWidth="1.1" fill="none" opacity="0.65" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Песочные часы с переворотом — значок «чей ход» */
+export function HourglassIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          values="0 12 12; 0 12 12; 180 12 12; 180 12 12"
+          keyTimes="0; 0.42; 0.5; 1"
+          dur="2.6s"
+          repeatCount="indefinite"
+        />
+        <path
+          d="M6.8 4.2 C6.8 8.6 10.6 10 11 12 C10.6 14 6.8 15.4 6.8 19.8 L17.2 19.8 C17.2 15.4 13.4 14 13 12 C13.4 10 17.2 8.6 17.2 4.2 Z"
+          fill="#F1E6CC"
+          stroke="#A9855A"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <rect x="4.9" y="1.6" width="14.2" height="3.1" rx="1.55" fill="#8B5E3C" stroke="#5B3B20" strokeWidth="0.7" />
+        <rect x="4.9" y="19.3" width="14.2" height="3.1" rx="1.55" fill="#8B5E3C" stroke="#5B3B20" strokeWidth="0.7" />
+        <path d="M9.1 6.1 C9.5 8.1 10.7 9.2 11.7 9.9 L12.3 9.9 C13.3 9.2 14.5 8.1 14.9 6.1 Z" fill="#E2B24E" />
+        <path d="M12 10.6 V16.2" stroke="#D9A13F" strokeWidth="1.15" strokeLinecap="round" />
+        <path d="M8.3 18.6 C8.9 15.9 10.9 14.4 12 13.6 C13.1 14.4 15.1 15.9 15.7 18.6 Z" fill="#D9A13F" />
+      </g>
     </svg>
   );
 }
@@ -50,6 +94,9 @@ export function IncomeIcon({ size = 18, className }: { size?: number; className?
     </svg>
   );
 }
+
+/** Пуговица-доход НЕ используется: на карточках и в шапке доход обозначается
+ *  ПЛЮСИКОМ (IncomeIcon) — единый значок дохода, как над полотном */
 
 /** Аватары ботов — «вышитые» портреты: печворк-фон, плечи, реквизит, стёжка-ободок */
 export function BotAvatar({ level, size = 56, thinking = false }: { level: BotLevel; size?: number; thinking?: boolean }) {
@@ -297,10 +344,11 @@ const AV_BODY: Record<BotLevel, React.ReactNode> = {
   ),
 };
 
-/** Карточка лоскутка на рынке: бирки цены/времени прямо на фигурке */
+/** Карточка лоскутка на рынке: размер слева-сверху, фигурка по центру свободной зоны
+ *  (выравнивание относительно её размера), справа столбик «цена → время → доход»,
+ *  название по центру снизу */
 export function MarketCard({
   patchId,
-  index,
   buttons,
   placeable,
   selected,
@@ -308,70 +356,122 @@ export function MarketCard({
   onSelect,
 }: {
   patchId: number;
-  index: 0 | 1 | 2;
   buttons: number;
   placeable: boolean;
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
 }) {
+  const lang = useLang();
   const patch = PATCHES[patchId];
   const affordable = buttons >= patch.cost;
   const can = affordable && placeable;
   const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
   const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
-  const maxDim = Math.max(maxR, maxC);
-  const glyph = Math.min(46, 14 + maxDim * 8.5);
-  const blockedText = !placeable ? 'не помещается' : !affordable ? 'мало пуговиц' : null;
+  // запас под обводку контура, чтобы фигурку не подрезало по краям svg
+  const vbPad = 0.06;
+  const name = patchName(lang, patchId);
+  const blockedText = !placeable ? t('m_not_fit') : !affordable ? t('m_no_buttons') : null;
   return (
     <button
       type="button"
       onClick={onSelect}
       disabled={disabled || !can || !onSelect}
-      aria-label={`Купить «${patch.name}» (${maxC}×${maxR}): ${patch.cost} пуговиц, ${patch.time} времени`}
-      className={`stitched-card relative flex w-full min-w-0 flex-col items-center gap-1 px-1.5 pb-1.5 pt-2 transition-all [touch-action:none]
+      aria-label={t('m_buy_aria', {
+        name,
+        w: maxC,
+        h: maxR,
+        cost: patch.cost,
+        time: patch.time,
+        inc: patch.income,
+      })}
+      className={`stitched-card relative flex w-full min-w-0 flex-col items-center gap-0.5 px-1 pb-1 pt-1 transition-all [touch-action:none]
         ${selected ? 'ring-4 ring-primary scale-[1.03] shadow-lg' : ''}
         ${!disabled && can ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]' : ''}
-        ${!can ? 'opacity-50 grayscale-[.45]' : ''}`}
+        ${!can ? 'opacity-60 grayscale-[.25]' : ''}`}
     >
-      <span className="absolute top-1.5 left-1.5 flex h-5.5 w-5.5 items-center justify-center rounded-full bg-primary text-[11px] font-extrabold text-primary-foreground shadow">
-        {index + 1}
+      {/* размер фигурки — слева сверху, компактная плашка (не перекрывает фигурку) */}
+      <span
+        className="absolute top-0.5 left-0.5 rounded-md bg-[#7A5230]/14 px-[3px] py-[1px] text-[9px] leading-none font-extrabold text-[#7A5230]"
+        title={t('m_size', { w: maxC, h: maxR })}
+      >
+        {maxC}×{maxR}
       </span>
-      {/* фигурка строго по центру карточки — бирки поверх, не сдвигают глиф */}
-      <div className="relative flex h-[50px] w-full items-center justify-center">
-        <svg width={glyph} height={glyph} viewBox={`0 0 ${maxDim} ${maxDim}`} aria-hidden>
-          <g transform={`translate(${(maxDim - maxC) / 2} ${(maxDim - maxR) / 2 - 0.2})`}>
+      {/* фигурка — по максимуму свободной зоны: вписывается и по ширине, и по
+          высоте (meet), viewBox повторяет пропорции самой фигурки; сверху отступ
+          под плашку размера, бирки — обычный поток справа, ничего не перекрывается */}
+      <div className="flex h-[58px] w-full items-center">
+        <div className="h-full min-w-0 flex-1 pt-[12px]">
+          <svg
+            viewBox={`${-vbPad} ${-vbPad} ${maxC + vbPad * 2} ${maxR + vbPad * 2}`}
+            className="h-full w-full"
+            preserveAspectRatio="xMidYMid meet"
+            aria-hidden
+          >
             <GlyphDirect patchId={patchId} />
-          </g>
-        </svg>
-        {/* бирки цены/времени в правом верхнем углу */}
-        <div className="absolute top-0 right-0 flex flex-col items-end gap-1">
-          <BadgePill small icon={<CoinIcon size={12} />} value={patch.cost} bad={!affordable} />
-          <BadgePill small icon={<ClockIcon size={12} />} value={patch.time} />
+          </svg>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-[2.5px] self-center">
+          <CardPill icon={<CoinIcon size={10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} />
+          <CardPill icon={<ClockIcon size={10} />} value={patch.time} title={t('m_time', { n: patch.time })} />
+          {/* доход — ПОД временем: зелёный если есть, красный с нулём если нет;
+              иконка — ПЛЮСИК, тот же значок дохода, что над полотном */}
+          <span
+            className={`flex items-center gap-0.5 rounded-full border-[1.5px] px-1 py-[1.5px] text-[10px] leading-none font-extrabold text-white shadow-md ${
+              patch.income > 0 ? 'border-[#1E6B36] bg-[#2F8F4E]' : 'border-[#7E2D1C] bg-[#B3432B]'
+            }`}
+            title={patch.income > 0 ? t('m_inc_yes', { n: patch.income }) : t('m_inc_no')}
+          >
+            <IncomeIcon size={10} />
+            {patch.income > 0 ? `+${patch.income}` : '0'}
+          </span>
         </div>
       </div>
-      {/* нижняя строка: размер · имя · статус (если нельзя купить) / доход */}
-      <div className="flex w-full items-center justify-between gap-1 px-0.5">
-        <span
-          className="shrink-0 rounded-md bg-[#7A5230]/14 px-1 py-[1.5px] text-[10px] leading-none font-extrabold text-[#7A5230]"
-          title={`Размер лоскутка: ${maxC}×${maxR}`}
-        >
-          {maxC}×{maxR}
-        </span>
+      {/* нижняя строка: название по центру; длинное или заблокированное — от левого края */}
+      <div className="flex w-full items-center">
         {blockedText ? (
-          <span className="min-w-0 flex-1 truncate rounded-full bg-destructive/90 px-1.5 py-[2px] text-center text-[9.5px] leading-none font-bold text-white">
+          <span
+            className="w-full truncate rounded-full bg-destructive/90 px-1 py-[1.5px] text-left text-[9px] leading-none font-bold text-white"
+            title={blockedText}
+          >
             {blockedText}
           </span>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-[10.5px] leading-none font-bold text-foreground/90">{patch.name}</span>
-        )}
-        {patch.income > 0 && !blockedText && (
-          <span className="flex shrink-0 items-center gap-0.5 text-[10px] leading-none font-extrabold text-[#A6721F]">
-            <CoinIcon size={10} />+{patch.income}
+          <span
+            className={`w-full truncate text-[10px] leading-none font-bold text-foreground/90 ${
+              name.length > 12 ? 'text-left' : 'text-center'
+            }`}
+          >
+            {name}
           </span>
         )}
       </div>
     </button>
+  );
+}
+
+/** Компактная бирка для столбика на карточке рынка (цена/время) */
+function CardPill({
+  icon,
+  value,
+  bad = false,
+  title,
+}: {
+  icon: React.ReactNode;
+  value: number;
+  bad?: boolean;
+  title: string;
+}) {
+  return (
+    <span
+      title={title}
+      className={`flex items-center gap-0.5 rounded-full border-[1.5px] bg-card px-1 py-[1.5px] text-[10px] leading-none font-extrabold shadow-sm ${
+        bad ? 'border-destructive/60 text-destructive' : 'border-[#A9855A]/60 text-foreground'
+      }`}
+    >
+      {icon}
+      {value}
+    </span>
   );
 }
 
@@ -466,11 +566,22 @@ export function GlyphDirect({ patchId, orientation = 0 }: { patchId: number; ori
   const orients = orientationsFor(patchId);
   const orient = orients[Math.min(orientation, orients.length - 1)];
   const outline = outlineFor(orient.cells);
+  // пуговицы дохода — рисуются прямо на фигурке всегда и везде
+  const incomeCells = def.income > 0 ? orient.cells.slice(0, def.income) : [];
   return (
     <g>
       <path d={outline.d} fill={def.color} stroke={shade(def.color, -46)} strokeWidth="0.06" />
       <path d={outline.d} fill={`url(#fab-${def.pattern})`} />
       <path d={outline.d} fill="none" stroke={shade(def.color, -70)} strokeWidth="0.055" strokeDasharray="0.16 0.11" strokeLinecap="round" />
+      {incomeCells.map(([r, c], i) => (
+        <g key={`inc${i}`} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.66)`}>
+          <circle r={0.42} fill="#FDF6E3" stroke="#5B3B20" strokeWidth={0.13} />
+          <circle r={0.09} cx={-0.14} cy={-0.14} fill="#5B3B20" />
+          <circle r={0.09} cx={0.14} cy={-0.14} fill="#5B3B20" />
+          <circle r={0.09} cx={-0.14} cy={0.14} fill="#5B3B20" />
+          <circle r={0.09} cx={0.14} cy={0.14} fill="#5B3B20" />
+        </g>
+      ))}
     </g>
   );
 }
@@ -483,12 +594,13 @@ export function UpcomingRibbon({
   upcoming: number[];
   onSelect?: (patchId: number) => void;
 }) {
+  const lang = useLang();
   if (upcoming.length === 0) return null;
   return (
     <div className="rounded-xl border-2 border-border bg-card/60 p-1">
       <div className="flex items-baseline justify-between px-1.5 pb-1">
-        <span className="text-[9.5px] font-extrabold tracking-wider text-muted-foreground uppercase">дальше в пути</span>
-        <span className="text-[9px] font-bold text-muted-foreground/80">{upcoming.length} шт</span>
+        <span className="text-[9.5px] font-extrabold tracking-wider text-muted-foreground uppercase">{t('g_ribbon')}</span>
+        <span className="text-[9px] font-bold text-muted-foreground/80">{t('g_ribbon_n', { n: upcoming.length })}</span>
       </div>
       <div className="hide-scrollbar overscroll-contain overflow-x-auto">
         <div className="flex w-max items-center gap-1.5 px-0.5 py-1">
@@ -501,7 +613,13 @@ export function UpcomingRibbon({
                 key={i}
                 type="button"
                 onClick={() => onSelect?.(id)}
-                aria-label={`${p?.name ?? ''}, ${maxC}×${maxR}: ${p?.cost ?? 0} пуговиц, ${p?.time ?? 0} времени`}
+                aria-label={t('m_ribbon_aria', {
+                  name: patchName(lang, id),
+                  w: maxC,
+                  h: maxR,
+                  cost: p?.cost ?? 0,
+                  time: p?.time ?? 0,
+                })}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-2 border-border bg-card/80 p-1 transition-transform active:scale-95"
               >
                 <svg viewBox={`0 0 ${maxC} ${maxR}`} className="h-full w-full" aria-hidden>
@@ -518,17 +636,19 @@ export function UpcomingRibbon({
 
 /** Попап с данными лоскутка из ленты «дальше в пути» */
 export function PatchDetailPopup({ patchId, onClose }: { patchId: number; onClose: () => void }) {
+  const lang = useLang();
   const patch = PATCHES[patchId];
   const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
   const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
   const maxDim = Math.max(maxR, maxC);
+  const name = patchName(lang, patchId);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`Лоскуток «${patch.name}»`}
+      aria-label={t('m_d_aria', { name })}
     >
       <div
         className="stitched-card pop-in w-full max-w-[300px] p-4 text-center"
@@ -546,19 +666,19 @@ export function PatchDetailPopup({ patchId, onClose }: { patchId: number; onClos
             </g>
           </svg>
         </div>
-        <div className="mt-1 font-display text-[19px] text-foreground">{patch.name}</div>
+        <div className="mt-1 font-display text-[19px] text-foreground">{name}</div>
         <div className="mt-2 grid grid-cols-2 gap-1.5 px-1">
-          <DetailStat icon={<CoinIcon size={15} />} label="цена" value={patch.cost} />
-          <DetailStat icon={<ClockIcon size={15} />} label="время" value={patch.time} />
-          <DetailStat label="размер" value={`${maxC}×${maxR}`} />
-          <DetailStat icon={<CoinIcon size={15} />} label="доход" value={patch.income > 0 ? `+${patch.income}` : '—'} />
+          <DetailStat icon={<CoinIcon size={15} />} label={t('m_d_price')} value={patch.cost} />
+          <DetailStat icon={<ClockIcon size={15} />} label={t('m_d_time')} value={patch.time} />
+          <DetailStat label={t('m_d_size')} value={`${maxC}×${maxR}`} />
+          <DetailStat icon={<CoinIcon size={15} />} label={t('m_d_income')} value={patch.income > 0 ? `+${patch.income}` : '—'} />
         </div>
         <button
           type="button"
           onClick={onClose}
           className="btn-cloth mt-3 w-full rounded-xl py-2 text-[14px] font-extrabold"
         >
-          Понятно
+          {t('m_d_ok')}
         </button>
       </div>
     </div>
@@ -602,8 +722,12 @@ export function AdvanceButton({
         шагнуть{preview.distance > 0 ? ` на ${preview.distance}` : ''}
       </span>
       {preview.leathers > 0 && (
-        <span className="rounded-full bg-[#7A5230]/70 px-1.5 text-[9px] font-bold text-[#F2E6CD]">
-          +кожаный
+        <span
+          className="flex items-center gap-0.5 rounded-full bg-[#7A5230]/70 px-1.5 py-[2px]"
+          title={`${preview.leathers > 1 ? `${preview.leathers} кожаных лоскутка` : 'кожаный лоскуток'} на пути`}
+        >
+          <LeatherPatchIcon size={12} />
+          {preview.leathers > 1 && <span className="text-[9px] font-bold text-[#F2E6CD]">×{preview.leathers}</span>}
         </span>
       )}
     </button>

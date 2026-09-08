@@ -8,6 +8,7 @@ import {
   canPlaceAt,
   orientationsFor,
 } from '@/lib/game/placement';
+import { t } from '@/lib/i18n';
 import { PatchGlyph, orientationCells } from './PatchGlyph';
 
 export interface BoardTheme {
@@ -93,8 +94,9 @@ export function QuiltBoard({
         return;
       }
       const { h, w } = ghost.orient;
-      // лоскуток центрируется над пальцем (на клетку выше центра)
-      const r = clamp(cell.r - Math.floor((h - 1) / 2) - 1, 0, BOARD_SIZE - h);
+      // лоскуток центрируется НА клетке под пальцем: палец указывает место —
+      // фигура обязана попадать именно туда (вниз/в самый нижний ряд тоже)
+      const r = clamp(cell.r - Math.floor((h - 1) / 2), 0, BOARD_SIZE - h);
       const c = clamp(cell.c - Math.floor((w - 1) / 2), 0, BOARD_SIZE - w);
       if (r !== placing.r || c !== placing.c) onPlace(r, c);
     },
@@ -137,7 +139,7 @@ export function QuiltBoard({
         if (e.buttons === 1 || e.pointerType === 'touch') handlePointer(e);
       }}
       role="img"
-      aria-label="Ваше лоскутное полотно"
+      aria-label={t('g_board_aria')}
     >
       {/* фон-лён */}
       <rect x="0" y="0" width="900" height="900" rx="26" fill={theme.bg} />
@@ -241,7 +243,6 @@ export function QuiltBoard({
             y={placing.r * 100}
             cell={100}
             opacity={0.72}
-            income={false}
             ghost={ghost.legal ? 'ok' : 'bad'}
           />
           {!ghost.legal && (
@@ -323,12 +324,11 @@ export function MiniQuilt({ board, className }: { board: number[]; className?: s
           x={p.c * 100}
           y={p.r * 100}
           cell={100}
-          income={false}
         />
       ))}
       {covered === 0 && (
         <text x="450" y="470" textAnchor="middle" fontSize="60" fill="#B9A87F" fontWeight="600">
-          пусто
+          {t('g_empty')}
         </text>
       )}
     </svg>

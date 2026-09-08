@@ -77,12 +77,12 @@ export function PatchGlyph({
       )}
       {/* пуговицы дохода */}
       {incomeCells.map(([r, c], i) => (
-        <g key={i} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.55)`}>
-          <circle r={0.42} fill="#f4ead5" stroke={shade('#f4ead5', -90)} strokeWidth={0.09} />
-          <circle r={0.1} cx={-0.13} cy={-0.13} fill={shade('#f4ead5', -120)} />
-          <circle r={0.1} cx={0.13} cy={-0.13} fill={shade('#f4ead5', -120)} />
-          <circle r={0.1} cx={-0.13} cy={0.13} fill={shade('#f4ead5', -120)} />
-          <circle r={0.1} cx={0.13} cy={0.13} fill={shade('#f4ead5', -120)} />
+        <g key={i} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.6)`}>
+          <circle r={0.42} fill="#FDF6E3" stroke="#5B3B20" strokeWidth={0.12} />
+          <circle r={0.1} cx={-0.13} cy={-0.13} fill="#5B3B20" />
+          <circle r={0.1} cx={0.13} cy={-0.13} fill="#5B3B20" />
+          <circle r={0.1} cx={-0.13} cy={0.13} fill="#5B3B20" />
+          <circle r={0.1} cx={0.13} cy={0.13} fill="#5B3B20" />
         </g>
       ))}
       </g>

@@ -57,9 +57,10 @@ export function createGame(opts: CreateGameOptions): GameState {
     const j = Math.floor(rng() * (i + 1));
     [circle[i], circle[j]] = [circle[j], circle[i]];
   }
-  // токен ставится между уникальным лоскутком 2×1 (id 0) и следующим по кругу
+  // токен ставится прямо ПЕРЕД уникальным лоскутком 2×1 (id 0):
+  // по правилам домино 2×1 — первый из трёх доступных для покупки
   const dominoPos = circle.indexOf(0);
-  const tokenIndex = dominoPos; // доступные начинаются со следующего
+  const tokenIndex = (dominoPos - 1 + circle.length) % circle.length; // доступные начинаются со следующего
 
   const state: GameState = {
     seed: opts.seed,
@@ -69,6 +70,7 @@ export function createGame(opts: CreateGameOptions): GameState {
     tokenIndex,
     players: [emptyPlayer(), emptyPlayer()],
     activePlayer: opts.firstPlayer,
+    topToken: null,
     firstPlayer: opts.firstPlayer,
     turn: 0,
     phase: 'action',
@@ -78,7 +80,7 @@ export function createGame(opts: CreateGameOptions): GameState {
     log: [],
     result: null,
   };
-  pushLog(state, -1, 'system', `Партия началась. Первой шьёт ${opts.firstPlayer === 0 ? 'вы' : 'соперница'}.`);
+  pushLog(state, -1, 'system', 'start', { first: opts.firstPlayer });
   return state;
 }
 
@@ -104,12 +106,19 @@ function cloneResult(r: GameResult): GameResult {
   };
 }
 
-function pushLog(state: GameState, player: number, kind: LogEntry['kind'], text: string) {
-  state.log.push({ turn: state.turn, player, text, kind });
+function pushLog(
+  state: GameState,
+  player: number,
+  kind: LogEntry['kind'],
+  code: string,
+  data?: Record<string, string | number>,
+) {
+  // фраза локализуется при отображении (i18n.logLine); в сейве — только код и данные
+  state.log.push({ turn: state.turn, player, kind, code, data });
   if (state.log.length > 80) state.log.splice(0, state.log.length - 80);
 }
 
-/** Доступные для покупки лоскутки (до 3 после токена) */
+/** Доступные для покупки лоскутки (до 3 после токена; последний лоскуток не продаётся) */
 export interface AvailablePatch {
   marketIndex: 0 | 1 | 2;
   circleIndex: number;
@@ -118,7 +127,8 @@ export interface AvailablePatch {
 
 export function availablePatches(state: GameState): AvailablePatch[] {
   const n = state.circle.length;
-  const count = Math.min(3, n);
+  // по правилам: когда в круге остаётся 1 лоскуток — покупать больше нельзя, только шагать
+  const count = n > 1 ? Math.min(3, n) : 0;
   const list: AvailablePatch[] = [];
   for (let i = 0; i < count; i++) {
     const circleIndex = (state.tokenIndex + 1 + i) % n;
@@ -192,20 +202,15 @@ function moveTime(
   if (gainPerSpace) {
     const gain = to - from;
     p.buttons += gain;
-    events.push({ type: 'buttons', player: playerIdx, delta: gain, reason: 'advance' });
+    events.push({ type: 'buttons', player: playerIdx, delta: gain, reason: 'advance', to });
   }
   for (const m of INCOME_MARKERS) {
     if (m > from && m <= to) {
       const gain = p.income;
       if (gain > 0) {
         p.buttons += gain;
-        events.push({ type: 'buttons', player: playerIdx, delta: gain, reason: 'income' });
-        pushLog(
-          state,
-          playerIdx,
-          'income',
-          `${playerIdx === 0 ? 'Вы' : 'Соперница'} получила доход: +${gain} пуговиц.`,
-        );
+        events.push({ type: 'buttons', player: playerIdx, delta: gain, reason: 'income', to: m });
+        pushLog(state, playerIdx, 'income', 'income', { n: gain });
       }
     }
   }
@@ -222,7 +227,7 @@ function moveTime(
       events.push({ type: 'leather', player: playerIdx });
     } else {
       events.push({ type: 'leatherDiscard', player: playerIdx });
-      pushLog(state, playerIdx, 'leather', 'Кожаный лоскуток пропал — полотно заполнено.');
+      pushLog(state, playerIdx, 'leather', 'leatherDiscard');
     }
   }
   return to;
@@ -236,12 +241,7 @@ function checkTile(state: GameState, playerIdx: number, events: GameEvent[]) {
     state.tile7x7Owner = playerIdx;
     state.players[playerIdx].tile7x7 = true;
     events.push({ type: 'tile7x7', player: playerIdx });
-    pushLog(
-      state,
-      playerIdx,
-      'tile',
-      `${playerIdx === 0 ? 'Вы получили' : 'Соперница получила'} спецплитку 7×7: +${TILE_7X7_POINTS} очков!`,
-    );
+    pushLog(state, playerIdx, 'tile', 'tile', { n: TILE_7X7_POINTS });
   }
 }
 
@@ -280,8 +280,18 @@ function finishGame(state: GameState, events: GameEvent[]) {
 function finishTurn(state: GameState, events: GameEvent[]) {
   const a = state.players[state.activePlayer];
   const b = state.players[1 - state.activePlayer];
-  if (a.time > b.time) {
-    state.activePlayer = 1 - state.activePlayer;
+  // правило Patchwork: ходит та, чья фишка ПОЗАДИ. Встав точно на клетку
+  // соперницы, фишка ходившего ложится СВЕРХУ — она считается «позади»,
+  // берёт +1 пуговицу и ХОДИТ ЕЩЁ РАЗ (ход пропускается только если
+  // фишка строго обогнала соперницу)
+  if (a.time === b.time) {
+    state.topToken = state.activePlayer;
+  } else {
+    state.topToken = null;
+    if (a.time > b.time) {
+      state.activePlayer = 1 - state.activePlayer;
+    }
+    // a.time < b.time — ходившая всё ещё позади: ходит снова
   }
   if (state.players[0].time >= TIME_END && state.players[1].time >= TIME_END) {
     finishGame(state, events);
@@ -308,12 +318,21 @@ export function advanceAction(input: GameState): ActionResult {
   const target = Math.min(TIME_END, other.time + 1);
   state.turn++;
   moveTime(state, playerIdx, target, true, events);
-  pushLog(
-    state,
-    playerIdx,
-    'advance',
-    `${playerIdx === 0 ? 'Вы продвинулись' : 'Соперница продвинулась'} вперёд за пуговицами.`,
-  );
+  // крайний случай: соперница уже у финиша — шагнув, встаём точно на её клетку
+  // (даёт +1 пуговицу и ещё один ход по общему правилу посадки)
+  const advOther = state.players[1 - playerIdx];
+  if (state.players[playerIdx].time === advOther.time && state.players[playerIdx].time > 0) {
+    state.players[playerIdx].buttons += 1;
+    events.push({
+      type: 'buttons',
+      player: playerIdx,
+      delta: 1,
+      reason: 'landing',
+      to: state.players[playerIdx].time,
+    });
+    pushLog(state, playerIdx, 'advance', 'landAdv');
+  }
+  pushLog(state, playerIdx, 'advance', 'advance');
   if (state.pendingQueue.length > 0) {
     state.phase = 'placing';
     return { state, events };
@@ -354,17 +373,26 @@ export function buyAndPlace(
   stampPiece(p.board, item.patchId, placement);
   p.covered += cells.length;
   events.push({ type: 'place', player: playerIdx, pieceId: item.patchId });
-  pushLog(
-    state,
-    playerIdx,
-    'buy',
-    `${playerIdx === 0 ? 'Вы сшили' : 'Соперница сшила'} «${patch.name}» (−${patch.cost} пуговиц, время +${patch.time}).`,
-  );
-  // 1-2. изъятие из круга и перенос токена
+  pushLog(state, playerIdx, 'buy', 'buy', {
+    patchId: item.patchId,
+    cost: patch.cost,
+    time: patch.time,
+  });
+  // 1-2. изъятие из круга и перенос токена в освободившийся промежуток:
+  // напальчник встаёт НА МЕСТО взятого лоскутка, поэтому следующими продаются
+  // лоскутки ПОСЛЕ него (оставшиеся два из тройки + новые из круга)
   state.circle.splice(item.circleIndex, 1);
-  state.tokenIndex = state.circle.length > 0 ? item.circleIndex % state.circle.length : 0;
+  state.tokenIndex = (item.circleIndex - 1 + state.circle.length) % state.circle.length;
   // 5. движение времени
   moveTime(state, playerIdx, p.time + patch.time, false, events);
+  // 5а. встали точно на клетку соперницы — 1 пуговица из банка и ЕЩЁ ОДИН ХОД
+  // (правило Patchwork: фишка вставшей ложится сверху и считается «позади»)
+  const other = state.players[1 - playerIdx];
+  if (p.time === other.time && p.time > 0) {
+    p.buttons += 1;
+    events.push({ type: 'buttons', player: playerIdx, delta: 1, reason: 'landing', to: p.time });
+    pushLog(state, playerIdx, 'buy', 'landBuy');
+  }
   checkTile(state, playerIdx, events);
   if (state.pendingQueue.length > 0) {
     state.phase = 'placing';
@@ -388,7 +416,7 @@ export function placeLeather(input: GameState, r: number, c: number): ActionResu
   p.covered++;
   state.pendingQueue.shift();
   events.push({ type: 'place', player: pending.player, pieceId: LEATHER_ID, pos: { r, c } });
-  pushLog(state, pending.player, 'leather', 'Кожаный лоскуток зашит.');
+  pushLog(state, pending.player, 'leather', 'leatherSewn');
   checkTile(state, pending.player, events);
   if (state.pendingQueue.length > 0) return { state, events };
   state.phase = 'action';
@@ -404,7 +432,7 @@ export function scoreBreakdown(state: GameState, playerIdx: number): ScoreBreakd
 /** Кто сейчас ходит, с учётом «верхней» фишки (для подсветки) */
 export function moverLabel(state: GameState): string {
   if (state.phase === 'gameover') return 'Партия завершена';
-  return state.activePlayer === 0 ? 'Ваш ход' : 'Ход соперницы';
+  return state.activePlayer === 0 ? 'Ваш ход' : 'Ход соперника';
 }
 
 /** Быстрая проверка: есть ли у игрока пустые клетки */

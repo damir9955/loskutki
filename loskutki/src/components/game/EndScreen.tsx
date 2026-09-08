@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { BOT_PERSONAS } from '@/lib/game/constants';
 import type { GameState } from '@/lib/game/types';
+import { personaName, t, useLang } from '@/lib/i18n';
 import { MiniQuilt } from './QuiltBoard';
 import { BotAvatar, CoinIcon } from './MarketRow';
 import { sound } from '@/lib/sound';
@@ -71,6 +71,7 @@ export function EndScreen({
   onRematch: () => void;
   onHome: () => void;
 }) {
+  const lang = useLang();
   const result = state.result;
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -83,7 +84,7 @@ export function EndScreen({
   if (!result) return null;
   const won = result.winner === 0;
   const tie = result.winner === null;
-  const persona = BOT_PERSONAS[state.botLevel];
+  const botName = personaName(lang, state.botLevel);
   const my = result.scores[0];
   const bot = result.scores[1];
   const diff = my.total - bot.total;
@@ -98,16 +99,16 @@ export function EndScreen({
               won ? 'text-primary' : tie ? 'text-muted-foreground' : 'text-destructive'
             }`}
           >
-            {won ? 'Победа!' : tie ? 'Ничья' : 'Поражение'}
+            {won ? t('e_win') : tie ? t('e_tie') : t('e_lose')}
           </div>
           <div className="mt-1 text-[15px] font-bold text-muted-foreground">
             {won
               ? diff >= 15
-                ? 'Безупречный шов — сопернице не за чем угнаться!'
-                : 'Ваше полотно сшито лучше!'
+                ? t('e_win_big')
+                : t('e_win_small')
               : tie
-                ? 'Стёжка в стёжку'
-                : 'Не в этот раз — стёжка не сошлась'}
+                ? t('e_tie_sub')
+                : t('e_lose_sub')}
           </div>
           <div className="stitch-divider my-3" />
         </div>
@@ -115,7 +116,7 @@ export function EndScreen({
         <div className="grid grid-cols-2 gap-3">
           {/* Игрок */}
           <div className="rounded-xl border-2 border-primary/40 bg-primary/8 p-2.5">
-            <div className="mb-1.5 text-center text-[12px] font-extrabold tracking-wide text-primary uppercase">Вы</div>
+            <div className="mb-1.5 text-center text-[12px] font-extrabold tracking-wide text-primary uppercase">{t('e_you')}</div>
             <div className="mx-auto w-full">
               <MiniQuilt board={state.players[0].board} className="mx-auto w-full rounded-lg" />
             </div>
@@ -125,7 +126,7 @@ export function EndScreen({
           <div className="rounded-xl border-2 border-border bg-card/60 p-2.5">
             <div className="mb-1.5 flex items-center justify-center gap-1.5 text-[12px] font-extrabold tracking-wide text-muted-foreground uppercase">
               <BotAvatar level={state.botLevel} size={18} />
-              {persona.name}
+              {botName}
             </div>
             <MiniQuilt board={state.players[1].board} className="mx-auto w-full rounded-lg" />
             <ScoreList s={bot} delay={700} />
@@ -134,7 +135,8 @@ export function EndScreen({
 
         <div className="mt-3 rounded-xl px-3 py-2.5 text-center">
           <span className="text-[17px] font-extrabold text-foreground">
-            Итог: <span className={won ? 'text-primary' : 'text-[#8a5a3a]'}>
+            {t('e_total')}
+            <span className={won ? 'text-primary' : 'text-[#8a5a3a]'}>
               {my.total > 0 ? '+' : ''}{my.total}
             </span>{' '}
             : {bot.total > 0 ? '+' : ''}{bot.total}
@@ -147,14 +149,14 @@ export function EndScreen({
             onClick={onRematch}
             className="btn-wood h-14 rounded-2xl text-[17px] font-extrabold"
           >
-            Реванш
+            {t('e_rematch')}
           </button>
           <button
             type="button"
             onClick={onHome}
             className="btn-wood h-13 rounded-2xl text-[16px] font-extrabold"
           >
-            В меню
+            {t('e_home')}
           </button>
         </div>
       </div>
@@ -178,18 +180,18 @@ function ScoreList({
   }, [delay]);
   return (
     <div className={`mt-2 space-y-1 text-[13.5px] font-semibold transition-opacity duration-500 ${shown ? 'opacity-100' : 'opacity-0'}`}>
-      <Row label="Пуговицы" value={`+${s.buttons}`} />
-      {s.tile > 0 && <Row label="Плитка 7×7" value={`+${s.tile}`} gold />}
-      {s.emptyCount > 0 && <Row label={`Пустые клетки (${s.emptyCount})`} value={`${s.empty}`} bad />}
+      <Row label={t('e_buttons')} value={`+${s.buttons}`} />
+      {s.tile > 0 && <Row label={t('e_tile')} value={`+${s.tile}`} gold />}
+      {s.emptyCount > 0 && <Row label={t('e_empty_cells', { n: s.emptyCount })} value={`${s.empty}`} bad />}
       <div className="stitch-divider !my-1" />
       <div className="flex justify-between text-[15px] font-extrabold">
-        <span>{mine ? 'Ваш счёт' : 'Счёт'}</span>
+        <span>{mine ? t('e_my_score') : t('e_score')}</span>
         <span className={s.total >= 0 ? 'text-primary' : 'text-destructive'}>
           {s.total > 0 ? '+' : ''}
           {s.total}
         </span>
       </div>
-      <div className="text-[11.5px] text-muted-foreground">закрыто {s.covered}/81</div>
+      <div className="text-[11.5px] text-muted-foreground">{t('e_covered', { n: s.covered })}</div>
     </div>
   );
 }

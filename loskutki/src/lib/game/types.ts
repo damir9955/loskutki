@@ -29,8 +29,13 @@ export interface PendingPlacement {
 export interface LogEntry {
   turn: number;
   player: number;
-  text: string;
   kind: 'buy' | 'advance' | 'income' | 'leather' | 'tile' | 'system';
+  /** старый формат (сейвы до локализации) — готовый текст, показываем как есть */
+  text?: string;
+  /** код фразы для локализации: start · income · advance · buy · landAdv · landBuy · tile · leatherSewn · leatherDiscard */
+  code?: string;
+  /** параметры подстановки в шаблон фразы */
+  data?: Record<string, string | number>;
 }
 
 export interface GameEvent {
@@ -47,7 +52,7 @@ export interface GameEvent {
   from?: number;
   to?: number;
   delta?: number;
-  reason?: 'advance' | 'income' | 'buy' | 'start';
+  reason?: 'advance' | 'income' | 'buy' | 'start' | 'landing';
   pos?: { r: number; c: number } | null;
 }
 
@@ -62,6 +67,8 @@ export interface GameState {
   players: [PlayerState, PlayerState];
   /** 0 — человек, 1 — бот */
   activePlayer: number;
+  /** чья фишка СВЕРХУ, когда обе на одной клетке (вставшая точно на соперника; null — клетки разные) */
+  topToken: number | null;
   /** кто ходил первым */
   firstPlayer: number;
   turn: number;

@@ -33,6 +33,19 @@ import { isLegalPlacement, mirroredOrientation, rotatedOrientation, orientations
 import { decideBotAction, decideLeatherCell, suggestPlacement, suggestForHuman } from '@/lib/game/bot';
 import { dailyNumber } from '@/lib/game/rng';
 import type { GameEvent, GameState } from '@/lib/game/types';
+import {
+  achDesc,
+  achTitle,
+  logLine,
+  patchName,
+  personaDifficulty,
+  personaInitial,
+  personaName,
+  personaQuips,
+  t,
+  useDocumentTitle,
+  useLang,
+} from '@/lib/i18n';
 import { QuiltBoard, MiniQuilt } from './QuiltBoard';
 import { TimeTrack, type TrackPopup } from './TimeTrack';
 import {
@@ -43,6 +56,7 @@ import {
   ClockIcon,
   CoinIcon,
   GlyphDirect,
+  HourglassIcon,
   IncomeIcon,
   LeatherPatchIcon,
   MarketCard,
@@ -73,6 +87,9 @@ export interface GameScreenProps {
 
 export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: GameScreenProps) {
   const { toast } = useToast();
+  const lang = useLang();
+  // заголовок вкладки — на языке интерфейса («Лоскутки» / «Patchwork»)
+  useDocumentTitle();
   const [placing, setPlacing] = useState<{ marketIndex: 0 | 1 | 2; patchId: number; orientation: number; r: number; c: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [popups, setPopups] = useState<TrackPopup[]>([]);
@@ -81,6 +98,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
   const [showBotBoard, setShowBotBoard] = useState(false);
   const [endedShown, setEndedShown] = useState(false);
   const [hintOn, setHintOn] = useState(() => loadStore().settings.hints);
+  /** разовая подсказка: лампочка включается нажатием и гаснет, как только
+   *  подсказка использована (выбрана карточка / шаг вперёд / переставлен призрак).
+   *  Показов не ограничено — просто жмите лампочку снова */
   const [showHint, setShowHint] = useState(false);
   const [botTick, setBotTick] = useState(0);
   /** «чип» перетаскивания лоскутка с карточки (следует за пальцем вне полотна) */
@@ -100,6 +120,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
   const me = state.players[0];
   const bot = state.players[1];
   const persona = BOT_PERSONAS[state.botLevel];
+  const botName = personaName(lang, state.botLevel);
+  const botQuips = personaQuips(lang, state.botLevel);
   const myTurn = state.phase === 'action' && state.activePlayer === 0;
   const leatherHuman = state.phase === 'placing' && currentPending(state)?.player === 0;
   const leatherBot = state.phase === 'placing' && currentPending(state)?.player === 1;
@@ -139,7 +161,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           if (d > 0) {
             sound.income();
             vibrate(12, settings.current.vibration);
-            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' ? 'buttons' : 'income');
+            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' || e.reason === 'landing' ? 'buttons' : 'income');
+            if (e.reason === 'landing') {
+              // понятное объяснение правила посадки на клетку соперника
+              toast({
+                title: e.player === 0 ? t('g_landing_you') : t('g_landing_bot', { name: botName }),
+                description: e.player === 0 ? t('g_landing_you_d') : t('g_landing_bot_d'),
+              });
+            }
             await sleep(FAST ? 40 : 260);
           } else if (d < 0 && !movesHuman) {
             sound.buy();
@@ -160,18 +189,19 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
               title: (
                 <span className="flex items-center gap-1.5">
                   <LeatherPatchIcon size={18} />
-                  Кожаный лоскуток!
+                  {t('g_leather_t')}
                 </span>
               ),
-              description: 'Пройдена спецклетка — поставьте его на полотно.',
+              description: t('g_leather_d'),
             });
           }
           await sleep(FAST ? 20 : 200);
         } else if (e.type === 'tile7x7') {
           sound.tile();
           toast({
-            title: '🏅 Золотая нашивка 7×7!',
-            description: `${e.player === 0 ? 'Вы' : persona.name} заполнили квадрат 7×7: +7 очков.`,
+            title: t('g_tile_t'),
+            description:
+              e.player === 0 ? t('g_tile_you_d') : t('g_tile_bot_d', { name: botName }),
           });
           vibrate([30, 60, 30, 60, 60], settings.current.vibration);
           await sleep(FAST ? 60 : 500);
@@ -180,7 +210,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
         }
       }
     },
-    [addPopup, persona.name, toast],
+    [addPopup, botName, lang, toast],
   );
 
   /** Применить результат действия + анимации */
@@ -224,7 +254,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           // действие бота
           if (s.phase === 'action' && s.activePlayer === 1) {
             await sleep(BOT_DELAY());
-            if (Math.random() < 0.3) setQuip(persona.quips[Math.floor(Math.random() * persona.quips.length)]);
+            if (Math.random() < 0.3) setQuip(botQuips[Math.floor(Math.random() * botQuips.length)]);
             const decision = decideBotAction(s);
             if (decision.action === 'advance') {
               sound.advance();
@@ -277,7 +307,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
       next.currentGame = null;
       saveStore(next);
       for (const a of unlocked) {
-        toast({ title: `${a.icon} Достижение: «${a.title}»`, description: a.description });
+        toast({ title: t('g_ach', { icon: a.icon, title: achTitle(lang, a.id) }), description: achDesc(lang, a.id) });
       }
       setTimeout(() => setEndedShown(true), FAST ? 200 : 900);
     }
@@ -296,7 +326,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
       }
       sound.ensure();
       sound.tap();
-      const sug = suggestPlacement(state, 0, item.patchId);
+      // Позиция НЕ подставляется автоматически — это работа подсказки.
+      // Без лампочки призрак появляется в центре полотна, и игрок сразу тащит
+      // его пальцем на нужное место; с (разовой) подсказкой — на рекомендуемом месте.
+      const sug = showHint ? suggestPlacement(state, 0, item.patchId) : null;
       const orients = orientationsFor(item.patchId);
       const o = sug?.orientation ?? 0;
       const or = orients[o];
@@ -307,8 +340,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
         r: sug ? sug.r : Math.floor((9 - or.h) / 2),
         c: sug ? sug.c : Math.floor((9 - or.w) / 2),
       });
+      // подсказка разовая: сработала при выборе карточки — гасим до следующего
+      // нажатия лампочки
+      if (showHint) setShowHint(false);
     },
-    [market, checks, state],
+    [market, checks, state, showHint],
   );
 
   const confirmPlacement = useCallback(async () => {
@@ -333,6 +369,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
     sound.ensure();
     sound.advance();
     setPlacing(null);
+    // подсказка разовая — любое действие игрока её гасит
+    setShowHint(false);
     await applyResult(advanceAction(state), true);
   }, [myTurn, state, applyResult]);
 
@@ -352,7 +390,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
     [placing, me.board],
   );
 
-  // подсказка (кнопка-лампочка)
+  // подсказка (кнопка-лампочка) — разовая: активна до первого использования
   const hint = useMemo(() => {
     if (!showHint || !myTurn) return null;
     return suggestForHuman(state);
@@ -367,9 +405,18 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
       const p = PATCHES[item.patchId];
       const maxR = Math.max(...p.cells.map((c) => c[0])) + 1;
       const maxC = Math.max(...p.cells.map((c) => c[1])) + 1;
-      return `Совет: возьмите №${hint.marketIndex + 1} «${p.name}» — ${p.cost} пуговиц, размер ${maxC}×${maxR}${p.income > 0 ? `, доход +${p.income}` : ''}`;
+      return t('g_hint_buy', {
+        name: patchName(lang, item.patchId),
+        cost: p.cost,
+        w: maxC,
+        h: maxR,
+        inc: p.income > 0 ? t('g_hint_buy_inc', { n: p.income }) : '',
+      });
     }
-    return `Совет: шагните вперёд — получите +${advPreview.buttonGain} пуговиц${advPreview.leathers > 0 ? ' и кожаный лоскуток' : ''}`;
+    return t('g_hint_adv', {
+      n: advPreview.buttonGain,
+      leath: advPreview.leathers > 0 ? t('g_hint_adv_leath') : '',
+    });
   })();
 
   const quiltPlacing = placing
@@ -388,20 +435,20 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
   const upcoming = useMemo(() => {
     const n = state.circle.length;
     const out: number[] = [];
-    // ВСЕ лоскутки дальше в пути — после трёх доступных у иглы
-    for (let i = 4; i < n; i++) {
-      out.push(state.circle[(state.tokenIndex + i) % n]);
+    // ВСЕ лоскутки дальше в пути — после доступных у токена
+    for (let i = market.length; i < n; i++) {
+      out.push(state.circle[(state.tokenIndex + 1 + i) % n]);
     }
     return out;
-  }, [state]);
+  }, [state, market]);
 
   const turnBanner = (() => {
-    if (state.phase === 'gameover') return 'партия завершена';
-    if (leatherHuman) return 'кожаный лоскуток: тап по клетке';
-    if (placingNow) return 'разместите лоскуток';
-    if (busy && state.activePlayer === 1) return `ход: ${persona.name}`;
-    if (myTurn) return 'ваш ход';
-    if (state.activePlayer === 1) return `ход: ${persona.name}`;
+    if (state.phase === 'gameover') return t('g_over');
+    if (leatherHuman) return t('g_leather_turn');
+    if (placingNow) return t('g_place');
+    if (busy && state.activePlayer === 1) return t('g_bot_turn', { name: botName });
+    if (myTurn) return t('g_your_turn');
+    if (state.activePlayer === 1) return t('g_bot_turn', { name: botName });
     return '';
   })();
   const mySideNow = myTurn || placingNow || leatherHuman;
@@ -452,6 +499,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           const o = orientationsFor(patchId)[orientation];
           const r = Math.max(0, Math.min(9 - o.h, cell.r - Math.floor((o.h - 1) / 2)));
           const c = Math.max(0, Math.min(9 - o.w, cell.c - Math.floor((o.w - 1) / 2)));
+          // перетащили карточку на полотно — разовая подсказка использована
+          if (!ghostSet) setShowHint(false);
           setPlacing({ marketIndex, patchId, orientation, r, c });
           ghostSet = true;
           setDragChip(null);
@@ -506,50 +555,65 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
   }, [placing]);
 
   return (
-    <div className="mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)] xl:max-w-[1200px] xl:flex-row xl:gap-6">
+    <div className="mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)] xl:max-w-[1200px] xl:flex-row xl:gap-6">
       {/* ===== Игровая колонка ===== */}
       <div className="flex min-h-0 w-full flex-col xl:w-[600px] xl:shrink-0">
-        {/* Шапка */}
-        <div className="flex items-center justify-between py-1">
+        {/* Шапка — компактная, чтобы полотно было больше */}
+        <div className="flex items-center justify-between py-0.5">
           <button
             type="button"
             onClick={() => {
               sound.tap();
               onExit();
             }}
-            className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
-            aria-label="Выйти в меню"
+            className="btn-cloth flex h-8 w-8 items-center justify-center rounded-xl"
+            aria-label={t('g_exit')}
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-[18px] w-[18px]" />
           </button>
           <div className="min-w-[130px] text-center leading-tight">
-            <div className="font-display text-[20px] text-foreground">Лоскутки</div>
+            <div className="font-display text-[17px] text-foreground">{t('app_title')}</div>
             {/* индикатор хода — компакт, в подзаголовке (не занимает отдельную строку) */}
             <div
               key={turnBanner}
-              className={`banner-in flex items-center justify-center gap-1.5 text-[11.5px] font-extrabold tracking-wide ${
+              className={`banner-in flex items-center justify-center gap-1.5 text-[10.5px] font-extrabold tracking-wide ${
                 mySideNow ? 'text-primary' : 'text-muted-foreground'
               }`}
             >
-              {mySideNow && (
-                <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary shadow-sm" />
+              {mySideNow ? (
+                <HourglassIcon size={12} className="shrink-0" />
+              ) : (
+                <ClockIcon size={12} className="shrink-0 opacity-70" />
               )}
-              <span className="truncate">{turnBanner || (state.mode === 'daily' ? `игра дня №${dailyNumber(new Date())}` : 'пэчворк-дуэль')}</span>
+              <span className="truncate">{turnBanner || (state.mode === 'daily' ? t('daily_mode', { n: dailyNumber(new Date()) }) : t('duel_mode'))}</span>
             </div>
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1">
             <button
               type="button"
               onClick={() => {
                 sound.tap();
+                // Разовая подсказка: одно нажатие — один совет (лимита нет, жмите
+                // сколько нужно). Если лоскуток уже размещается — сразу переставляем
+                // призрак на рекомендуемое место; иначе совет показывается до
+                // первого использования и гаснет.
+                if (placing) {
+                  const sug = suggestPlacement(state, 0, placing.patchId);
+                  if (sug) {
+                    setPlacing((p) => (p ? { ...p, orientation: sug.orientation, r: sug.r, c: sug.c } : p));
+                  }
+                  setShowHint(false);
+                  return;
+                }
+                if (!myTurn) return;
                 setShowHint((v) => !v);
               }}
-              className={`btn-cloth flex h-9 w-9 items-center justify-center rounded-xl ${
+              className={`btn-cloth flex h-8 w-8 items-center justify-center rounded-xl ${
                 showHint ? 'bg-[#FFF7E0] ring-2 ring-[#D9A13F]' : ''
               }`}
-              aria-label="Подсказка"
+              aria-label={t('g_hint')}
             >
-              <Lightbulb className="h-4.5 w-4.5" fill={showHint ? '#FFD98A' : 'none'} />
+              <Lightbulb className="h-4 w-4" fill={showHint ? '#FFD98A' : 'none'} />
             </button>
             <button
               type="button"
@@ -557,38 +621,38 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
                 sound.tap();
                 onOpenRules();
               }}
-              className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
-              aria-label="Правила"
+              className="btn-cloth flex h-8 w-8 items-center justify-center rounded-xl"
+              aria-label={t('g_rules')}
             >
-              <BookOpen className="h-4.5 w-4.5" />
+              <BookOpen className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Панель соперницы: статы компактными значками справа от неё */}
-        <div className="stitched-card fabric-lattice flex items-center gap-1.5 px-2 py-0.5">
-          <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[3px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
-            <BotAvatar level={state.botLevel} size={38} thinking={busy && state.activePlayer === 1} />
+        {/* Панель соперника — компактнее, чтобы полотно было больше */}
+        <div className="stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0">
+          <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
+            <BotAvatar level={state.botLevel} size={32} thinking={busy && state.activePlayer === 1} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-extrabold text-foreground">{persona.name}</div>
-            <div className="truncate text-[10px] font-bold text-muted-foreground">{persona.difficulty}</div>
+            <div className="truncate text-[12px] font-extrabold text-foreground">{botName}</div>
+            <div className="truncate text-[9px] font-bold text-muted-foreground">{personaDifficulty(lang, state.botLevel)}</div>
           </div>
-          <div className="flex items-center gap-1">
-            <EnemyTile icon={<CoinIcon size={16} />} value={bot.buttons} title="Пуговицы соперника" />
-            <EnemyTile icon={<IncomeIcon size={15} />} value={`+${bot.income}`} title="Доход соперника" />
+          <div className="flex items-center gap-0.5">
+            <EnemyTile icon={<CoinIcon size={14} />} value={bot.buttons} title={t('g_rival_buttons')} />
+            <EnemyTile icon={<IncomeIcon size={14} />} value={`+${bot.income}`} title={t('g_rival_income')} />
             <EnemyTile
-              icon={<ClockIcon size={15} />}
+              icon={<ClockIcon size={14} />}
               value={
                 <>
                   {bot.time}
-                  <span className="text-[9px] font-bold text-muted-foreground">/53</span>
+                  <span className="text-[8px] font-bold text-muted-foreground">/53</span>
                 </>
               }
-              title={`Время соперника: ${bot.time} из 53`}
+              title={t('g_rival_time', { t: bot.time })}
             />
             {bot.tile7x7 && (
-              <div className="pop-in flex h-9 w-7 items-center justify-center text-[14px]" title="Спецплитка 7×7">
+              <div className="pop-in flex h-8 w-7 items-center justify-center text-[13px]" title={t('g_tile7x7')}>
                 🏅
               </div>
             )}
@@ -597,24 +661,24 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
             <SheetTrigger asChild>
               <button
                 type="button"
-                className="btn-cloth flex h-10 w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl"
-                aria-label="Посмотреть полотно соперника"
+                className="btn-cloth flex h-8 w-8 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl"
+                aria-label={t('g_view_rival')}
               >
-                <BoardFillIcon size={21} covered={bot.covered} />
-                <span className="text-[9px] font-extrabold leading-none text-foreground/80">{bot.covered}</span>
+                <BoardFillIcon size={17} covered={bot.covered} />
+                <span className="text-[8.5px] font-extrabold leading-none text-foreground/80">{bot.covered}</span>
               </button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
-                  <BotAvatar level={state.botLevel} size={32} /> {persona.name}
+                  <BotAvatar level={state.botLevel} size={32} /> {botName}
                 </SheetTitle>
               </SheetHeader>
               <div className="px-4 pb-6">
                 <MiniQuilt board={bot.board} className="w-full rounded-xl border-2 border-border" />
                 <div className="mt-3 flex justify-center gap-2">
-                  <BigStat icon={<CoinIcon size={22} />} value={bot.buttons} label="пуговицы" />
-                  <BigStat icon={<IncomeIcon size={22} />} value={bot.income} label="доход" />
+                  <BigStat icon={<CoinIcon size={22} />} value={bot.buttons} label={t('g_buttons')} />
+                  <BigStat icon={<IncomeIcon size={22} />} value={bot.income} label={t('g_income')} />
                 </div>
                 {quip && (
                   <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-center text-[13px] font-semibold italic text-muted-foreground">
@@ -631,7 +695,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           <TimeTrack
             positions={[me.time, bot.time]}
             activePlayer={state.activePlayer}
-            onTop={state.activePlayer}
+            onTop={state.topToken ?? state.activePlayer}
+            labels={[t('pin_me'), personaInitial(lang, state.botLevel)]}
             leatherClaimed={state.leatherClaimed}
             popups={popups}
             advanceHint={myTurn ? { player: 0, from: me.time, to: advanceTo } : null}
@@ -640,17 +705,17 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
 
         {/* Мои статы — НАД полотном */}
         <div className="mt-1 flex items-center justify-center gap-1">
-          <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label="пуговицы" accent title="Ваши пуговицы" />
-          <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label="доход" title="Ваш доход с лоскутков" />
-          <BigStat icon={<ClockIcon size={16} />} value={me.time} label="из 53" title={`Ваше время: ${me.time} из 53`} />
+          <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} />
+          <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} />
+          <BigStat icon={<ClockIcon size={16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} />
           <BigStat
             icon={<BoardFillIcon size={16} covered={me.covered} />}
             value={me.covered}
-            label="клеток"
-            title={`Заполнено клеток: ${me.covered} из 81`}
+            label={t('g_cells')}
+            title={t('g_my_cells', { n: me.covered })}
           />
           {me.tile7x7 && (
-            <div className="pop-in flex h-[34px] w-8 items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px]" title="Спецплитка 7×7">
+            <div className="pop-in flex h-[34px] w-8 items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px]" title={t('g_tile7x7')}>
               🏅
             </div>
           )}
@@ -680,7 +745,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
             {leatherHuman && (
               <div className="pointer-events-none absolute -top-1 left-1/2 z-10 flex -translate-x-1/2 -translate-y-full items-center gap-1.5 whitespace-nowrap rounded-full bg-[#7A5230] px-3 py-1 text-[12px] font-bold text-[#F2E6CD] shadow-lg">
                 <LeatherPatchIcon size={14} />
-                тапните по свободной клетке
+                {t('g_leather_tip')}
               </div>
             )}
 
@@ -709,7 +774,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
                       setPlacing(null);
                     }}
                     className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-                    aria-label="Отменить покупку"
+                    aria-label={t('g_cancel')}
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -731,7 +796,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
                       });
                     }}
                     className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-                    aria-label="Повернуть"
+                    aria-label={t('g_rotate')}
                   >
                     <RotateCw className="h-5 w-5" />
                   </button>
@@ -753,7 +818,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
                       });
                     }}
                     className="btn-cloth flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-                    aria-label="Отразить"
+                    aria-label={t('g_flip')}
                   >
                     <FlipHorizontal className="h-5 w-5" />
                   </button>
@@ -762,10 +827,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
                     onClick={() => void confirmPlacement()}
                     disabled={!ghostLegal}
                     className="btn-wood flex h-11 items-center gap-1.5 rounded-full px-5 text-[15.5px] font-extrabold"
-                    aria-label="Пришить лоскуток"
+                    aria-label={t('g_sew_aria')}
                   >
                     <Check className="h-5 w-5" />
-                    Пришить
+                    {t('g_sew')}
                   </button>
                 </div>
               </div>
@@ -774,9 +839,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
         </div>
 
         {/* Рынок: тап или перетаскивание прямо на полотно (чуть левее и ниже — по свободному месту) */}
-        <div className="mt-2.5">
+        <div className="mt-2">
           <div
-            className={`-ml-1.5 flex gap-2 transition-opacity ${
+            className={`-ml-1.5 flex gap-1.5 transition-opacity ${
               placingNow && !dragActive ? 'pointer-events-none opacity-40' : 'opacity-100'
             }`}
           >
@@ -788,7 +853,6 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
               >
                 <MarketCard
                   patchId={m.patchId}
-                  index={m.marketIndex}
                   buttons={me.buttons}
                   placeable={check.placeable}
                   selected={
@@ -822,11 +886,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           className={`btn-wood mt-1 flex h-12 w-full items-center justify-between gap-2 rounded-xl px-3 ${
             forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
           } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
-          aria-label={`Шагнуть вперёд с ${me.time} на ${advanceTo}: получить ${advPreview.buttonGain} пуговиц`}
+          aria-label={t('g_advance_aria', { from: me.time, to: advanceTo, n: advPreview.buttonGain })}
         >
           <span className="flex min-w-0 items-center gap-1.5">
             <ChevronsRight className="h-5 w-5 shrink-0" />
-            <span className="shrink-0 text-[14.5px] font-extrabold">Шагнуть вперёд</span>
+            <span className="shrink-0 text-[14.5px] font-extrabold">{t('g_advance')}</span>
             {/* числа и значок времени — в заметной тёмной плашке, не сливаются с кнопкой */}
             <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#3F2A14]/35 px-2 py-1 shadow-[inset_0_1px_2px_rgba(0,0,0,.25)]">
               <span className="tabular-nums text-[14px] leading-none font-extrabold">{me.time}</span>
@@ -839,8 +903,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
             <span className="tabular-nums">+{advPreview.buttonGain}</span>
             <CoinIcon size={17} />
             {advPreview.leathers > 0 && (
-              <span className="ml-1 flex items-center gap-1 rounded-full bg-[#7A5230]/70 px-1.5 py-0.5 text-[10px] font-bold text-[#F2E6CD]">
-                +кожаный
+              <span
+                className="ml-1 flex items-center gap-0.5 rounded-full bg-[#7A5230]/70 px-1.5 py-0.5"
+                title={advPreview.leathers > 1 ? t('g_leather_n', { n: advPreview.leathers }) : t('g_leather_1')}
+              >
+                <LeatherPatchIcon size={13} />
+                {advPreview.leathers > 1 && (
+                  <span className="text-[10px] leading-none font-bold text-[#F2E6CD]">×{advPreview.leathers}</span>
+                )}
               </span>
             )}
           </span>
@@ -851,14 +921,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
       <aside className="hidden w-[300px] flex-col gap-2 xl:flex">
         <div className="stitched-card mt-1.5 max-h-[45vh] flex-1 overflow-y-auto p-3">
           <div className="mb-1 text-[11px] font-extrabold tracking-wide text-muted-foreground uppercase">
-            Хроника партии
+            {t('g_chronicle')}
           </div>
           {[...state.log].reverse().slice(0, 16).map((l, i) => (
             <div
               key={i}
               className={`text-[12.5px] font-semibold ${l.player === 0 ? 'text-foreground' : 'text-muted-foreground'}`}
             >
-              {l.text}
+              {logLine(lang, l)}
             </div>
           ))}
         </div>
@@ -925,9 +995,11 @@ function DragGlyph({ patchId }: { patchId: number }) {
   const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
   const maxDim = Math.max(maxR, maxC);
   const size = Math.min(56, 15 + maxDim * 9);
+  // запас под обводку контура, чтобы фигурку не подрезало по краям svg
+  const vbPad = 0.05;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${maxDim} ${maxDim}`} aria-hidden>
-      <g transform={`translate(${(maxDim - maxC) / 2} ${(maxDim - maxR) / 2 - 0.2})`}>
+    <svg width={size} height={size} viewBox={`${-vbPad} ${-vbPad} ${maxDim + vbPad * 2} ${maxDim + vbPad * 2}`} aria-hidden>
+      <g transform={`translate(${(maxDim - maxC) / 2} ${(maxDim - maxR) / 2})`}>
         <GlyphDirect patchId={patchId} />
       </g>
     </svg>
