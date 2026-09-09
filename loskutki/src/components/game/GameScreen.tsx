@@ -61,14 +61,11 @@ import {
   LeatherPatchIcon,
   MarketCard,
   PatchDetailPopup,
-  Portrait,
   UpcomingRibbon,
 } from './MarketRow';
 import { EndScreen } from './EndScreen';
 import { sound, vibrate } from '@/lib/sound';
 import { loadStore, recordGame, saveStore, todayKey, type GameSummary } from '@/lib/storage';
-import { avatarUrl } from '@/lib/avatars';
-import type { NetAction } from '@/lib/game/types';
 import { useToast } from '@/hooks/use-toast';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 
@@ -86,27 +83,9 @@ export interface GameScreenProps {
   onExit: () => void;
   onRematch: () => void;
   onOpenRules: () => void;
-  /** онлайн-партия: ходы уходят на сервер, состояние приходит оттуда же */
-  online?: OnlineCtx;
 }
 
-/** Контекст онлайн-партии (состояние уже «повёрнуто» — я всегда игрок 0) */
-export interface OnlineCtx {
-  roomCode: string;
-  opponent: { name: string; avatar: string; connected: boolean; left: boolean };
-  /** дедлайн хода по часам сервера (epoch ms) */
-  turnDeadline: number | null;
-  /** serverNow − Date.now() на момент последнего poll — поправка часов */
-  clockOffset: number;
-  submit: (action: NetAction) => Promise<
-    { ok: true; state: GameState; events: GameEvent[] } | { ok: false; error: string }
-  >;
-  /** события чужого хода (пришли poll'ом) — проиграть один раз */
-  remoteEvents: GameEvent[] | null;
-  remoteEventsId: number;
-}
-
-export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, online }: GameScreenProps) {
+export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: GameScreenProps) {
   const { toast } = useToast();
   const lang = useLang();
   // заголовок вкладки — на языке интерфейса («Лоскутки» / «Patchwork»)
@@ -141,14 +120,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const me = state.players[0];
   const bot = state.players[1];
   const persona = BOT_PERSONAS[state.botLevel];
-  /** онлайн: соперник — живой человек из комнаты (имя/аватар из повёрнутого состояния) */
-  const isOnline = state.mode === 'online' && !!online;
-  const foeName = isOnline && online ? online.opponent.name : personaName(lang, state.botLevel);
-  const foeAvatar = isOnline && online ? avatarUrl(online.opponent.avatar) : null;
-  const foeSub = isOnline && online
-    ? (online.opponent.left ? t('mp_offline') : online.opponent.connected ? t('mp_online') : t('mp_offline'))
-    : personaDifficulty(lang, state.botLevel);
-  const foeInitial = isOnline ? (foeName.trim()[0] ?? '?').toUpperCase() : personaInitial(lang, state.botLevel);
+  const botName = personaName(lang, state.botLevel);
   const botQuips = personaQuips(lang, state.botLevel);
   const myTurn = state.phase === 'action' && state.activePlayer === 0;
   const leatherHuman = state.phase === 'placing' && currentPending(state)?.player === 0;
@@ -165,9 +137,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
   const advanceTo = Math.min(TIME_END, bot.time + 1);
 
-  // сохранение партии (только офлайн-режимы — онлайн живёт на сервере)
+  // сохранение партии
   useEffect(() => {
-    if (state.phase !== 'gameover' && state.mode !== 'online') {
+    if (state.phase !== 'gameover') {
       const store = loadStore();
       store.currentGame = state;
       saveStore(store);
@@ -189,21 +161,19 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           if (d > 0) {
             sound.income();
             vibrate(12, settings.current.vibration);
-            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' ? 'buttons' : 'income');
+            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' || e.reason === 'landing' ? 'buttons' : 'income');
+            if (e.reason === 'landing') {
+              // понятное объяснение правила посадки на клетку соперника
+              toast({
+                title: e.player === 0 ? t('g_landing_you') : t('g_landing_bot', { name: botName }),
+                description: e.player === 0 ? t('g_landing_you_d') : t('g_landing_bot_d'),
+              });
+            }
             await sleep(FAST ? 40 : 260);
           } else if (d < 0 && !movesHuman) {
             sound.buy();
             await sleep(FAST ? 20 : 160);
           }
-        } else if (e.type === 'landing') {
-          // посадка на клетку соперника: булавка сверху — ход продолжается без
-          // бонусов (просто понятное объяснение, почему ход снова у этого игрока)
-          vibrate(12, settings.current.vibration);
-          toast({
-            title: e.player === 0 ? t('g_landing_you') : t('g_landing_bot', { name: foeName }),
-            description: e.player === 0 ? t('g_landing_you_d') : t('g_landing_bot_d'),
-          });
-          await sleep(FAST ? 60 : 340);
         } else if (e.type === 'place') {
           sound.place();
           vibrate([14, 50, 14], settings.current.vibration);
@@ -231,7 +201,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           toast({
             title: t('g_tile_t'),
             description:
-              e.player === 0 ? t('g_tile_you_d') : t('g_tile_bot_d', { name: foeName }),
+              e.player === 0 ? t('g_tile_you_d') : t('g_tile_bot_d', { name: botName }),
           });
           vibrate([30, 60, 30, 60, 60], settings.current.vibration);
           await sleep(FAST ? 60 : 500);
@@ -240,7 +210,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         }
       }
     },
-    [addPopup, foeName, lang, toast],
+    [addPopup, botName, lang, toast],
   );
 
   /** Применить результат действия + анимации */
@@ -254,9 +224,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   // ===== ХОД БОТА (цикл — бот может действовать несколько раз подряд) =====
-  // в онлайн-партии соперник — живой человек: его ходы приходят с сервера
   useEffect(() => {
-    if (isOnline) return;
     if (botRunning.current) return;
     const s0 = stateRef.current;
     const needsBot =
@@ -318,9 +286,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     })();
   }, [state, applyResult, persona, botTick]);
 
-  // ===== КОНЕЦ ПАРТИИ: СТАТИСТИКА (офлайн; онлайн не пишется в историю) =====
+  // ===== КОНЕЦ ПАРТИИ: СТАТИСТИКА =====
   useEffect(() => {
-    if (state.phase === 'gameover' && !recorded.current && state.mode !== 'online') {
+    if (state.phase === 'gameover' && !recorded.current) {
       recorded.current = true;
       const r = state.result!;
       const store = loadStore();
@@ -386,26 +354,6 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       vibrate(70, settings.current.vibration);
       return;
     }
-    // онлайн: размещение проверяет и применяет сервер
-    if (online) {
-      const res = await online.submit({
-        type: 'buy',
-        marketIndex: placing.marketIndex,
-        orientation: placing.orientation,
-        r: placing.r,
-        c: placing.c,
-      });
-      if (!res.ok) {
-        sound.error();
-        vibrate(70, settings.current.vibration);
-        toast({ title: t('mp_move_rejected') });
-        return;
-      }
-      setPlacing(null);
-      sound.buy();
-      await applyResult(res, true);
-      return;
-    }
     const res = buyAndPlace(state, placing.marketIndex, {
       orientation: placing.orientation,
       r: placing.r,
@@ -414,7 +362,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     setPlacing(null);
     sound.buy();
     await applyResult(res, true);
-  }, [placing, me.board, state, applyResult, online, toast]);
+  }, [placing, me.board, state, applyResult]);
 
   const doAdvance = useCallback(async () => {
     if (!myTurn) return;
@@ -423,18 +371,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     setPlacing(null);
     // подсказка разовая — любое действие игрока её гасит
     setShowHint(false);
-    if (online) {
-      const res = await online.submit({ type: 'advance' });
-      if (!res.ok) {
-        sound.error();
-        toast({ title: t('mp_move_rejected') });
-        return;
-      }
-      await applyResult(res, true);
-      return;
-    }
     await applyResult(advanceAction(state), true);
-  }, [myTurn, state, applyResult, online, toast]);
+  }, [myTurn, state, applyResult]);
 
   const placeLeatherHuman = useCallback(
     async (r: number, c: number) => {
@@ -442,30 +380,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         sound.error();
         return;
       }
-      if (online) {
-        const res = await online.submit({ type: 'leather', r, c });
-        if (!res.ok) {
-          sound.error();
-          return;
-        }
-        await applyResult(res, true);
-        return;
-      }
       await applyResult(placeLeather(state, r, c), true);
     },
-    [me.board, state, applyResult, online],
+    [me.board, state, applyResult],
   );
-
-  // ===== ОНЛАЙН: события чужого хода (пришли poll'ом) — проиграть один раз =====
-  const remotePlayed = useRef(0);
-  useEffect(() => {
-    if (!online) return;
-    if (online.remoteEventsId <= remotePlayed.current) return;
-    remotePlayed.current = online.remoteEventsId;
-    if (online.remoteEvents && online.remoteEvents.length > 0) {
-      void playback(online.remoteEvents, false);
-    }
-  }, [online]);
 
   const ghostLegal = useMemo(
     () => (placing ? isLegalPlacement(me.board, placing.patchId, placing) : false),
@@ -528,9 +446,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     if (state.phase === 'gameover') return t('g_over');
     if (leatherHuman) return t('g_leather_turn');
     if (placingNow) return t('g_place');
-    if (busy && state.activePlayer === 1) return t('g_bot_turn', { name: foeName });
+    if (busy && state.activePlayer === 1) return t('g_bot_turn', { name: botName });
     if (myTurn) return t('g_your_turn');
-    if (state.activePlayer === 1) return t('g_bot_turn', { name: foeName });
+    if (state.activePlayer === 1) return t('g_bot_turn', { name: botName });
     return '';
   })();
   const mySideNow = myTurn || placingNow || leatherHuman;
@@ -560,9 +478,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       const check = checks.find((x) => x.m.marketIndex === marketIndex)?.check;
       const startX = e.clientX;
       const startY = e.clientY;
-      // фигурка переносится КАК ЕСТЬ — в той ориентации, в какой лежит в ряду
-      // (поворот и отражение — только осознанными кнопками игрока)
-      const orientation = 0;
+      const suggested = suggestPlacement(state, 0, patchId);
+      const orientation = suggested?.orientation ?? 0;
       let moved = false;
       let ghostSet = false;
 
@@ -668,10 +585,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
               ) : (
                 <ClockIcon size={12} className="shrink-0 opacity-70" />
               )}
-              <span className="truncate">{turnBanner || (state.mode === 'daily' ? t('daily_mode', { n: dailyNumber(new Date()) }) : state.mode === 'online' ? t('mp_mode') : t('duel_mode'))}</span>
-              {isOnline && online?.turnDeadline != null && (
-                <TurnTimer deadline={online.turnDeadline} offset={online.clockOffset} mine={mySideNow} />
-              )}
+              <span className="truncate">{turnBanner || (state.mode === 'daily' ? t('daily_mode', { n: dailyNumber(new Date()) }) : t('duel_mode'))}</span>
             </div>
           </div>
           <div className="flex gap-1">
@@ -718,15 +632,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         {/* Панель соперника — компактнее, чтобы полотно было больше */}
         <div className="stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0">
           <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
-            {foeAvatar ? (
-              <Portrait src={foeAvatar} size={32} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
-            ) : (
-              <BotAvatar level={state.botLevel} size={32} thinking={busy && state.activePlayer === 1} />
-            )}
+            <BotAvatar level={state.botLevel} size={32} thinking={busy && state.activePlayer === 1} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-extrabold text-foreground">{foeName}</div>
-            <div className={`truncate text-[9px] font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'}`}>{foeSub}</div>
+            <div className="truncate text-[12px] font-extrabold text-foreground">{botName}</div>
+            <div className="truncate text-[9px] font-bold text-muted-foreground">{personaDifficulty(lang, state.botLevel)}</div>
           </div>
           <div className="flex items-center gap-0.5">
             <EnemyTile icon={<CoinIcon size={14} />} value={bot.buttons} title={t('g_rival_buttons')} />
@@ -761,7 +671,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
-                  {foeAvatar ? <Portrait src={foeAvatar} size={32} alt={foeName} /> : <BotAvatar level={state.botLevel} size={32} />} {foeName}
+                  <BotAvatar level={state.botLevel} size={32} /> {botName}
                 </SheetTitle>
               </SheetHeader>
               <div className="px-4 pb-6">
@@ -786,7 +696,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             positions={[me.time, bot.time]}
             activePlayer={state.activePlayer}
             onTop={state.topToken ?? state.activePlayer}
-            labels={[t('pin_me'), foeInitial]}
+            labels={[t('pin_me'), personaInitial(lang, state.botLevel)]}
             leatherClaimed={state.leatherClaimed}
             popups={popups}
             advanceHint={myTurn ? { player: 0, from: me.time, to: advanceTo } : null}
@@ -1051,7 +961,6 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       {state.phase === 'gameover' && endedShown && (
         <EndScreen
           state={state}
-          opponent={isOnline && online ? { name: online.opponent.name, avatar: avatarUrl(online.opponent.avatar) } : undefined}
           onRematch={() => {
             sound.tap();
             onRematch();
@@ -1076,33 +985,6 @@ function EnemyTile({ icon, value, title }: { icon: React.ReactNode; value: React
       <span className="flex h-[15px] items-center justify-center">{icon}</span>
       <span className="flex h-[13px] items-center text-[12px] leading-none font-extrabold text-foreground">{value}</span>
     </div>
-  );
-}
-
-/** Таймер хода (онлайн): mm:ss; краснеет и пульсирует на последних 30 секундах */
-function TurnTimer({ deadline, offset, mine }: { deadline: number; offset: number; mine: boolean }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((v) => v + 1), 500);
-    return () => clearInterval(id);
-  }, []);
-  const left = Math.max(0, deadline - (Date.now() + offset));
-  const mm = Math.floor(left / 60000);
-  const ss = Math.floor((left % 60000) / 1000);
-  const urgent = left < 30_000;
-  return (
-    <span
-      className={`ml-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10.5px] font-extrabold leading-none tabular-nums ${
-        urgent
-          ? 'animate-pulse bg-destructive/15 text-destructive'
-          : mine
-            ? 'bg-primary/15 text-primary'
-            : 'bg-muted text-muted-foreground'
-      }`}
-      title={t('mp_timer_title')}
-    >
-      {mm}:{String(ss).padStart(2, '0')}
-    </span>
   );
 }
 

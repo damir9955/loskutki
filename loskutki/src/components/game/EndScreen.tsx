@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { GameState } from '@/lib/game/types';
 import { personaName, t, useLang } from '@/lib/i18n';
 import { MiniQuilt } from './QuiltBoard';
-import { BotAvatar, CoinIcon, Portrait } from './MarketRow';
+import { BotAvatar, CoinIcon } from './MarketRow';
 import { sound } from '@/lib/sound';
 
 const CONFETTI_COLORS = ['#C0603A', '#3E7C74', '#D9A13F', '#8E5A79', '#8AA06F', '#EFE0BC'];
@@ -64,13 +64,10 @@ function CountUp({ to, sign = 1 }: { to: number; sign?: number }) {
 
 export function EndScreen({
   state,
-  opponent,
   onRematch,
   onHome,
 }: {
   state: GameState;
-  /** онлайн: имя/аватар живого соперника (вместо бота) */
-  opponent?: { name: string; avatar: string };
   onRematch: () => void;
   onHome: () => void;
 }) {
@@ -87,7 +84,7 @@ export function EndScreen({
   if (!result) return null;
   const won = result.winner === 0;
   const tie = result.winner === null;
-  const botName = opponent?.name ?? personaName(lang, state.botLevel);
+  const botName = personaName(lang, state.botLevel);
   const my = result.scores[0];
   const bot = result.scores[1];
   const diff = my.total - bot.total;
@@ -128,7 +125,7 @@ export function EndScreen({
           {/* Бот */}
           <div className="rounded-xl border-2 border-border bg-card/60 p-2.5">
             <div className="mb-1.5 flex items-center justify-center gap-1.5 text-[12px] font-extrabold tracking-wide text-muted-foreground uppercase">
-              {opponent ? <Portrait src={opponent.avatar} size={18} /> : <BotAvatar level={state.botLevel} size={18} />}
+              <BotAvatar level={state.botLevel} size={18} />
               {botName}
             </div>
             <MiniQuilt board={state.players[1].board} className="mx-auto w-full rounded-lg" />

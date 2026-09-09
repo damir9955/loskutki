@@ -6,21 +6,14 @@ import type { GameState } from '@/lib/game/types';
 import { createGame } from '@/lib/game/engine';
 import { GameScreen } from '@/components/game/GameScreen';
 import { HomeScreen } from '@/components/game/HomeScreen';
-import { MultiplayerScreen } from '@/components/game/MultiplayerScreen';
-import { OnlineGameScreen } from '@/components/game/OnlineGameScreen';
 import RulesDialog from '@/components/game/RulesDialog';
 import { sound } from '@/lib/sound';
 import { loadStore, saveStore, todaySeedValue } from '@/lib/storage';
-import { loadSession, saveSession, type MpSession } from '@/lib/net';
 
 export default function Page() {
   const [game, setGame] = useState<GameState | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [gameKey, setGameKey] = useState(0);
-  // онлайн-режим: сессия сохраняется → после перезагрузки возвращаемся в комнату
-  const [session, setSession] = useState<MpSession | null>(() => loadSession());
-  const [mpOpen, setMpOpen] = useState(() => loadSession() !== null);
-  const [mpPlaying, setMpPlaying] = useState(false);
 
   // синхронизация настроек звука при загрузке
   useEffect(() => {
@@ -54,23 +47,12 @@ export default function Page() {
 
   const exitToHome = () => {
     // сохранить текущую партию при выходе (если не завершена)
-    if (game && game.phase !== 'gameover' && game.mode !== 'online') {
+    if (game && game.phase !== 'gameover') {
       const store = loadStore();
       store.currentGame = game;
       saveStore(store);
     }
     setGame(null);
-  };
-
-  const updateSession = (s: MpSession | null) => {
-    setSession(s);
-    saveSession(s);
-  };
-
-  const exitOnline = () => {
-    updateSession(null);
-    setMpPlaying(false);
-    setMpOpen(false);
   };
 
   return (
@@ -87,39 +69,12 @@ export default function Page() {
             setRulesOpen(true);
           }}
         />
-      ) : session && mpPlaying ? (
-        <OnlineGameScreen
-          key={`mp-${session.code}-${session.playerId}`}
-          session={session}
-          onExit={exitOnline}
-          onOpenRules={() => {
-            sound.tap();
-            setRulesOpen(true);
-          }}
-        />
-      ) : mpOpen || session ? (
-        <MultiplayerScreen
-          session={session}
-          onSessionChange={updateSession}
-          onPlaying={(s) => {
-            updateSession(s);
-            setMpPlaying(true);
-          }}
-          onExitHome={() => {
-            setMpOpen(false);
-          }}
-        />
       ) : (
         <HomeScreen
           onStart={startCasual}
           onDaily={startDaily}
           onResume={(s) => setGame(s)}
           onOpenRules={() => setRulesOpen(true)}
-          onOnline={() => {
-            sound.ensure();
-            sound.tap();
-            setMpOpen(true);
-          }}
         />
       )}
       <RulesDialog open={rulesOpen} onOpenChange={setRulesOpen} />

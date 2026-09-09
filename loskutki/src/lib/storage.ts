@@ -161,7 +161,7 @@ export interface GameSummary {
   leatherPlaced: number;
   tile7x7: boolean;
   finalButtons: number;
-  mode: 'casual' | 'daily' | 'online';
+  mode: 'casual' | 'daily';
   dailyKey?: string;
 }
 

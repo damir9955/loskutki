@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useSyncExternalStore } from 'react';
-import { BookOpen, BarChart3, Settings2, Play, CalendarDays, Sparkles, RotateCcw, Users } from 'lucide-react';
+import { BookOpen, BarChart3, Settings2, Play, CalendarDays, Sparkles, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -100,10 +100,9 @@ export interface HomeScreenProps {
   onDaily: () => void;
   onResume: (state: GameState) => void;
   onOpenRules: () => void;
-  onOnline: () => void;
 }
 
-export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }: HomeScreenProps) {
+export function HomeScreen({ onStart, onDaily, onResume, onOpenRules }: HomeScreenProps) {
   const { toast } = useToast();
   const lang = useLang();
   // заголовок вкладки — на языке интерфейса («Лоскутки» / «Patchwork»)
@@ -172,21 +171,6 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
         <Play className="mr-2 h-5 w-5" />
         {t('home_play')}
       </Button>
-
-      {/* С другом — онлайн по коду или через открытую комнату */}
-      <button
-        type="button"
-        onClick={onOnline}
-        className="mt-3 flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
-      >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
-          <Users className="h-6 w-6 text-[#3D5A77]" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[16px] font-extrabold text-foreground">{t('mp_title')}</div>
-          <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
-        </div>
-      </button>
 
       <button
         type="button"
