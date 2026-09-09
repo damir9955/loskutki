@@ -129,12 +129,12 @@ const DICT: Record<string, [string, string]> = {
   g_landing_you: ['Вы на клетке соперника!', "You're on the rival's cell!"],
   g_landing_bot: ['{name} — на вашей клетке', '{name} is on your cell'],
   g_landing_you_d: [
-    '+1 пуговица из банка, булавка сверху — и вы ходите ещё раз.',
-    '+1 button from the bank, the pin on top — and you go again.',
+    'Булавка ложится сверху — и вы ходите ещё раз.',
+    'Your pin goes on top — and you move again.',
   ],
   g_landing_bot_d: [
-    '+1 пуговица из банка — и ход продолжается.',
-    '+1 button from the bank — and the turn continues.',
+    'Булавка соперника сверху — его ход продолжается.',
+    "The rival's pin is on top — their turn continues.",
   ],
   g_leather_t: ['Кожаный лоскуток!', 'Leather patch!'],
   g_leather_d: ['Пройдена спецклетка — поставьте его на полотно.', 'Special cell passed — place it on your quilt.'],
@@ -219,15 +219,15 @@ const DICT: Record<string, [string, string]> = {
   log_advance_foe: ['Соперник продвинулся вперёд за пуговицами.', 'The rival moved ahead for buttons.'],
   log_buy_you: ['Вы сшили «{name}» (−{cost} пуговиц, время +{time}).', 'You sewed "{name}" (−{cost} buttons, time +{time}).'],
   log_buy_foe: ['Соперник сшил «{name}» (−{cost} пуговиц, время +{time}).', 'The rival sewed "{name}" (−{cost} buttons, time +{time}).'],
-  log_land_adv_you: ['Вы встали точно на булавку соперника: +1 пуговица из банка.', 'You landed exactly on the rival\u2019s pin: +1 button from the bank.'],
-  log_land_adv_foe: ['Соперник встал точно на вашу булавку: +1 пуговица из банка.', 'The rival landed exactly on your pin: +1 button from the bank.'],
-  log_land_buy_you: [
-    'Вы встали точно на булавку соперника: +1 пуговица из банка — и ходите ещё раз.',
-    'You landed exactly on the rival\u2019s pin: +1 button from the bank — and you go again.',
+  log_landAdv_you: ['Вы догнали соперника точно на его булавке.', 'You caught up with the rival exactly on their pin.'],
+  log_landAdv_foe: ['Соперник догнал вас точно на вашей булавке.', 'The rival caught up with you exactly on your pin.'],
+  log_landBuy_you: [
+    'Вы встали точно на булавку соперника — ходите ещё раз.',
+    'You landed exactly on the rival’s pin — you go again.',
   ],
-  log_land_buy_foe: [
-    'Соперник встал точно на вашу булавку: +1 пуговица из банка — и ходит ещё раз.',
-    'The rival landed exactly on your pin: +1 button from the bank — and goes again.',
+  log_landBuy_foe: [
+    'Соперник встал точно на вашу булавку — и ходит ещё раз.',
+    'The rival landed exactly on your pin — and goes again.',
   ],
   log_tile_you: ['Вы получили спецплитку 7×7: +{n} очков!', 'You earned the 7×7 special tile: +{n} points!'],
   log_tile_foe: ['Соперник получил спецплитку 7×7: +{n} очков!', 'The rival earned the 7×7 special tile: +{n} points!'],

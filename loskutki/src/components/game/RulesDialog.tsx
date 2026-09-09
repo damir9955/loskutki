@@ -66,8 +66,7 @@ function RulesRu() {
         <p>
           Ходит тот, чья булавка <b>ниже всех на дорожке времени</b> — иногда по несколько
           ходов подряд. Если вы встали <b>точно на клетку соперника</b>, ваша булавка ложится
-          <b>сверху</b>, вы берёте <b>+1 пуговицу</b> из банка и <b>ходите ещё раз</b>. В свой
-          ход выберите одно из двух действий:
+          <b>сверху</b> — и вы <b>ходите ещё раз</b>. В свой ход выберите одно из двух действий:
         </p>
       </Section>
 
@@ -182,8 +181,7 @@ function RulesEn() {
         <p>
           The player whose pin is <b>furthest behind on the time track</b> moves — sometimes
           several turns in a row. If you land <b>exactly on the rival’s cell</b>, your pin goes
-          <b> on top</b>, you take <b>+1 button</b> from the bank and <b>move again</b>. On your
-          turn, choose one of two actions:
+          <b> on top</b> — and you <b>move again</b>. On your turn, choose one of two actions:
         </p>
       </Section>
 

@@ -46,13 +46,14 @@ export interface GameEvent {
     | 'leather'
     | 'leatherDiscard'
     | 'tile7x7'
-    | 'gameover';
+    | 'gameover'
+    | 'landing';
   player?: number;
   pieceId?: number;
   from?: number;
   to?: number;
   delta?: number;
-  reason?: 'advance' | 'income' | 'buy' | 'start' | 'landing';
+  reason?: 'advance' | 'income' | 'buy' | 'start';
   pos?: { r: number; c: number } | null;
 }
 

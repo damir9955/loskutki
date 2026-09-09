@@ -161,19 +161,21 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
           if (d > 0) {
             sound.income();
             vibrate(12, settings.current.vibration);
-            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' || e.reason === 'landing' ? 'buttons' : 'income');
-            if (e.reason === 'landing') {
-              // понятное объяснение правила посадки на клетку соперника
-              toast({
-                title: e.player === 0 ? t('g_landing_you') : t('g_landing_bot', { name: botName }),
-                description: e.player === 0 ? t('g_landing_you_d') : t('g_landing_bot_d'),
-              });
-            }
+            addPopup(e.to ?? 0, `+${d}`, e.reason === 'advance' ? 'buttons' : 'income');
             await sleep(FAST ? 40 : 260);
           } else if (d < 0 && !movesHuman) {
             sound.buy();
             await sleep(FAST ? 20 : 160);
           }
+        } else if (e.type === 'landing') {
+          // посадка на клетку соперника: булавка сверху — ход продолжается без
+          // бонусов (просто понятное объяснение, почему ход снова у этого игрока)
+          vibrate(12, settings.current.vibration);
+          toast({
+            title: e.player === 0 ? t('g_landing_you') : t('g_landing_bot', { name: botName }),
+            description: e.player === 0 ? t('g_landing_you_d') : t('g_landing_bot_d'),
+          });
+          await sleep(FAST ? 60 : 340);
         } else if (e.type === 'place') {
           sound.place();
           vibrate([14, 50, 14], settings.current.vibration);
@@ -478,8 +480,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules }: G
       const check = checks.find((x) => x.m.marketIndex === marketIndex)?.check;
       const startX = e.clientX;
       const startY = e.clientY;
-      const suggested = suggestPlacement(state, 0, patchId);
-      const orientation = suggested?.orientation ?? 0;
+      // фигурка переносится КАК ЕСТЬ — в той ориентации, в какой лежит в ряду
+      // (поворот и отражение — только осознанными кнопками игрока)
+      const orientation = 0;
       let moved = false;
       let ghostSet = false;
 

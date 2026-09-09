@@ -5,6 +5,24 @@ import type { AvailablePatch } from '@/lib/game/engine';
 import type { AdvancePreview } from '@/lib/game/engine';
 import { patchName, t, useLang } from '@/lib/i18n';
 
+/** площадь самого большого лоскутка в игре (для пропорциональности фигурок) */
+const MAX_PATCH_AREA = Math.max(...PATCHES.map((p) => p.cells.length));
+
+/** Доля зоны (0.62…1), которую занимает фигурка: реальный размер лоскутка —
+ *  маленькие лоскутки рисуются заметно мельче больших, а не «на всю карточку».
+ *  Показатель 0.35 — по площади: пиксельная площадь фигурки ~ площади лоскутка. */
+export function glyphScaleFor(area: number): number {
+  return Math.min(1, Math.pow(Math.max(1, area) / MAX_PATCH_AREA, 0.35));
+}
+
+/** viewBox с запасом, вписанный в долю glyphScale от зоны (фигурка — по центру) */
+export function scaledGlyphViewBox(maxC: number, maxR: number, pad: number, area: number) {
+  const inv = 1 / glyphScaleFor(area);
+  const vbW = (maxC + pad * 2) * inv;
+  const vbH = (maxR + pad * 2) * inv;
+  return `${(maxC - vbW) / 2} ${(maxR - vbH) / 2} ${vbW} ${vbH}`;
+}
+
 /** Пуговица-иконка (валюта) */
 export function CoinIcon({ size = 18, className }: { size?: number; className?: string }) {
   return (
@@ -397,13 +415,14 @@ export function MarketCard({
       >
         {maxC}×{maxR}
       </span>
-      {/* фигурка — по максимуму свободной зоны: вписывается и по ширине, и по
-          высоте (meet), viewBox повторяет пропорции самой фигурки; сверху отступ
-          под плашку размера, бирки — обычный поток справа, ничего не перекрывается */}
+      {/* фигурка — ПРОПОРЦИОНАЛЬНО реальному размеру лоскутка: большие заполняют
+          зону, маленькие — заметно меньше (вписывается и по ширине, и по высоте —
+          meet, viewBox раздут ровно настолько, какую долю занимает фигурка);
+          сверху отступ под плашку размера, бирки — обычный поток справа */}
       <div className="flex h-[58px] w-full items-center">
         <div className="h-full min-w-0 flex-1 pt-[12px]">
           <svg
-            viewBox={`${-vbPad} ${-vbPad} ${maxC + vbPad * 2} ${maxR + vbPad * 2}`}
+            viewBox={scaledGlyphViewBox(maxC, maxR, vbPad, patch.cells.length)}
             className="h-full w-full"
             preserveAspectRatio="xMidYMid meet"
             aria-hidden
@@ -622,7 +641,11 @@ export function UpcomingRibbon({
                 })}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-2 border-border bg-card/80 p-1 transition-transform active:scale-95"
               >
-                <svg viewBox={`0 0 ${maxC} ${maxR}`} className="h-full w-full" aria-hidden>
+                <svg
+                  viewBox={scaledGlyphViewBox(maxC, maxR, 0.06, p ? p.cells.length : 1)}
+                  className="h-full w-full"
+                  aria-hidden
+                >
                   <GlyphDirect patchId={id} />
                 </svg>
               </button>
