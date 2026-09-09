@@ -43,7 +43,7 @@ function emptyPlayer(): import('./types').PlayerState {
 
 export interface CreateGameOptions {
   seed: number;
-  mode: 'casual' | 'daily';
+  mode: import('./types').GameMode;
   botLevel: BotLevel;
   /** кто ходит первым: 0 — человек, 1 — бот */
   firstPlayer: number;

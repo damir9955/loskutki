@@ -2,6 +2,8 @@ import type { BotLevel } from './constants';
 
 export type Phase = 'action' | 'placing' | 'gameover';
 
+export type GameMode = 'casual' | 'daily' | 'online';
+
 export interface PlayerState {
   /** пуговицы в кошельке */
   buttons: number;
@@ -57,9 +59,18 @@ export interface GameEvent {
   pos?: { r: number; c: number } | null;
 }
 
+/** Онлайн-мета партии: встраивается сервером в состояние при повороте для зрителя */
+export interface OnlineMeta {
+  code: string;
+  myName: string;
+  myAvatar: string;
+  foeName: string;
+  foeAvatar: string;
+}
+
 export interface GameState {
   seed: number;
-  mode: 'casual' | 'daily';
+  mode: GameMode;
   botLevel: BotLevel;
   /** порядок лоскутков в круге (id) */
   circle: number[];
@@ -82,6 +93,37 @@ export interface GameState {
   tile7x7Owner: number | null;
   log: LogEntry[];
   result: GameResult | null;
+  /** заполнено только в онлайн-партии (со стороны зрителя) */
+  online?: OnlineMeta | null;
+}
+
+export interface NetAction {
+  type: 'advance' | 'buy' | 'leather';
+  marketIndex?: 0 | 1 | 2;
+  orientation?: number;
+  r?: number;
+  c?: number;
+}
+
+export interface MpRoomView {
+  code: string;
+  status: 'waiting' | 'playing' | 'finished' | 'abandoned';
+  isPublic: boolean;
+  mySeat: 0 | 1;
+  me: { name: string; avatar: string; connected: boolean };
+  foe: { name: string; avatar: string; connected: boolean; left: boolean } | null;
+  wins: [number, number];
+  rematchMe: boolean;
+  rematchFoe: boolean;
+  version: number;
+  gameSeq: number;
+  turnDeadline: number | null;
+  serverNow: number;
+  state: GameState | null;
+  events: GameEvent[] | null;
+  eventsVersion: number;
+  timedOutSeat: number | null;
+  timedOutVersion: number | null;
 }
 
 export interface ScoreBreakdown {

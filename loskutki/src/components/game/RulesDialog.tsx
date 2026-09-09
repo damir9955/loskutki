@@ -161,6 +161,15 @@ function RulesRu() {
           ход — один совет за нажатие, нажимайте сколько нужно.
         </p>
       </Section>
+
+      <Section title="С другом (онлайн)">
+        <p>
+          С главного экрана жмите <b>«С другом»</b>: создайте комнату и передайте другу
+          6-значный код — или отметьте «открытая для всех» и ждите любого игрока из поиска.
+          Вход по коду тоже ищите на экране «С другом». {t('mp_rules_note')} Комната
+          переживает перезагрузку страницы — просто откройте игру снова.
+        </p>
+      </Section>
     </>
   );
 }
@@ -274,6 +283,15 @@ function RulesEn() {
           spot, rotate and mirror with the buttons, then “Sew”. Short on buttons? Press “Step
           forward” and collect income. The lightbulb gives one tip per press —
           press it as often as you like.
+        </p>
+      </Section>
+
+      <Section title="With a friend (online)">
+        <p>
+          On the home screen tap <b>“With a friend”</b>: create a room and share the 6-character
+          code with a friend — or mark it “open to everyone” and wait for any player from the
+          search list. Joining by code happens on the same screen. {t('mp_rules_note')} The room
+          survives a page reload — just open the game again.
         </p>
       </Section>
     </>
