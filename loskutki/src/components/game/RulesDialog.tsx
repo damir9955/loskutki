@@ -66,8 +66,7 @@ function RulesRu() {
         <p>
           Ходит тот, чья булавка <b>ниже всех на дорожке времени</b> — иногда по несколько
           ходов подряд. Если вы встали <b>точно на клетку соперника</b>, ваша булавка ложится
-          <b>сверху</b>, вы берёте <b>+1 пуговицу</b> из банка и <b>ходите ещё раз</b>. В свой
-          ход выберите одно из двух действий:
+          <b>сверху</b> — и вы <b>ходите ещё раз</b>. В свой ход выберите одно из двух действий:
         </p>
       </Section>
 
@@ -162,6 +161,15 @@ function RulesRu() {
           ход — один совет за нажатие, нажимайте сколько нужно.
         </p>
       </Section>
+
+      <Section title="С другом (онлайн)">
+        <p>
+          С главного экрана жмите <b>«С другом»</b>: создайте комнату и передайте другу
+          6-значный код — или отметьте «открытая для всех» и ждите любого игрока из поиска.
+          Вход по коду тоже ищите на экране «С другом». {t('mp_rules_note')} Комната
+          переживает перезагрузку страницы — просто откройте игру снова.
+        </p>
+      </Section>
     </>
   );
 }
@@ -182,8 +190,7 @@ function RulesEn() {
         <p>
           The player whose pin is <b>furthest behind on the time track</b> moves — sometimes
           several turns in a row. If you land <b>exactly on the rival’s cell</b>, your pin goes
-          <b> on top</b>, you take <b>+1 button</b> from the bank and <b>move again</b>. On your
-          turn, choose one of two actions:
+          <b> on top</b> — and you <b>move again</b>. On your turn, choose one of two actions:
         </p>
       </Section>
 
@@ -276,6 +283,15 @@ function RulesEn() {
           spot, rotate and mirror with the buttons, then “Sew”. Short on buttons? Press “Step
           forward” and collect income. The lightbulb gives one tip per press —
           press it as often as you like.
+        </p>
+      </Section>
+
+      <Section title="With a friend (online)">
+        <p>
+          On the home screen tap <b>“With a friend”</b>: create a room and share the 6-character
+          code with a friend — or mark it “open to everyone” and wait for any player from the
+          search list. Joining by code happens on the same screen. {t('mp_rules_note')} The room
+          survives a page reload — just open the game again.
         </p>
       </Section>
     </>

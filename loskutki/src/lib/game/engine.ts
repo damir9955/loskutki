@@ -43,7 +43,7 @@ function emptyPlayer(): import('./types').PlayerState {
 
 export interface CreateGameOptions {
   seed: number;
-  mode: 'casual' | 'daily';
+  mode: import('./types').GameMode;
   botLevel: BotLevel;
   /** кто ходит первым: 0 — человек, 1 — бот */
   firstPlayer: number;
@@ -281,9 +281,8 @@ function finishTurn(state: GameState, events: GameEvent[]) {
   const a = state.players[state.activePlayer];
   const b = state.players[1 - state.activePlayer];
   // правило Patchwork: ходит та, чья фишка ПОЗАДИ. Встав точно на клетку
-  // соперницы, фишка ходившего ложится СВЕРХУ — она считается «позади»,
-  // берёт +1 пуговицу и ХОДИТ ЕЩЁ РАЗ (ход пропускается только если
-  // фишка строго обогнала соперницу)
+  // соперницы, фишка ходившего ложится СВЕРХУ — она считается «позади»
+  // и ХОДИТ ЕЩЁ РАЗ (ход пропускается только если фишка строго обогнала соперницу)
   if (a.time === b.time) {
     state.topToken = state.activePlayer;
   } else {
@@ -318,20 +317,8 @@ export function advanceAction(input: GameState): ActionResult {
   const target = Math.min(TIME_END, other.time + 1);
   state.turn++;
   moveTime(state, playerIdx, target, true, events);
-  // крайний случай: соперница уже у финиша — шагнув, встаём точно на её клетку
-  // (даёт +1 пуговицу и ещё один ход по общему правилу посадки)
-  const advOther = state.players[1 - playerIdx];
-  if (state.players[playerIdx].time === advOther.time && state.players[playerIdx].time > 0) {
-    state.players[playerIdx].buttons += 1;
-    events.push({
-      type: 'buttons',
-      player: playerIdx,
-      delta: 1,
-      reason: 'landing',
-      to: state.players[playerIdx].time,
-    });
-    pushLog(state, playerIdx, 'advance', 'landAdv');
-  }
+  // крайний случай (соперница уже на 53): кламп приводит точно на её клетку —
+  // при равенстве на финише игра сразу заканчивается, бонусов за посадку нет
   pushLog(state, playerIdx, 'advance', 'advance');
   if (state.pendingQueue.length > 0) {
     state.phase = 'placing';
@@ -385,12 +372,11 @@ export function buyAndPlace(
   state.tokenIndex = (item.circleIndex - 1 + state.circle.length) % state.circle.length;
   // 5. движение времени
   moveTime(state, playerIdx, p.time + patch.time, false, events);
-  // 5а. встали точно на клетку соперницы — 1 пуговица из банка и ЕЩЁ ОДИН ХОД
-  // (правило Patchwork: фишка вставшей ложится сверху и считается «позади»)
+  // 5а. встали точно на клетку соперницы — булавка ложится СВЕРХУ и ходившая
+  // ХОДИТ ЕЩЁ РАЗ (пуговицы за саму посадку правилами Patchwork не положено)
   const other = state.players[1 - playerIdx];
   if (p.time === other.time && p.time > 0) {
-    p.buttons += 1;
-    events.push({ type: 'buttons', player: playerIdx, delta: 1, reason: 'landing', to: p.time });
+    events.push({ type: 'landing', player: playerIdx, to: p.time });
     pushLog(state, playerIdx, 'buy', 'landBuy');
   }
   checkTile(state, playerIdx, events);
