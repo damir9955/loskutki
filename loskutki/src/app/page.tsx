@@ -67,10 +67,15 @@ export default function Page() {
     saveSession(s);
   };
 
-  const exitOnline = () => {
-    updateSession(null);
+  const exitOnline = (reason: 'user' | 'error') => {
+    if (reason === 'user') {
+      // осознанный выход — сессию чистим, назад не вернуть
+      updateSession(null);
+    }
+    // сбой связи — сессию СОХРАНЯЕМ: в хабе предложим вернуться в партию
     setMpPlaying(false);
-    setMpOpen(false);
+    // возвращаемся в хаб «С другом» — оттуда сразу можно создать/войти в комнату
+    setMpOpen(true);
   };
 
   return (

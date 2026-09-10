@@ -384,33 +384,12 @@ export function BigStat({
   );
 }
 
-/** Прямой рендер лоскутка в единичных координатах (для превью) */
-import { orientationsFor } from '@/lib/game/placement';
-import { outlineFor, shade } from '@/lib/game/outline';
+/** Прямой рендер лоскутка в единичных координатах (для превью) —
+ *  тот же движок, что и на полотне: швы между клетками + объёмные пуговицы */
+import { PatchGlyph } from './PatchGlyph';
 
 export function GlyphDirect({ patchId, orientation = 0 }: { patchId: number; orientation?: number }) {
-  const def = patchId === LEATHER_ID ? LEATHER_PATCH : PATCHES[patchId];
-  const orients = orientationsFor(patchId);
-  const orient = orients[Math.min(orientation, orients.length - 1)];
-  const outline = outlineFor(orient.cells);
-  // пуговицы дохода — рисуются прямо на фигурке всегда и везде
-  const incomeCells = def.income > 0 ? orient.cells.slice(0, def.income) : [];
-  return (
-    <g>
-      <path d={outline.d} fill={def.color} stroke={shade(def.color, -46)} strokeWidth="0.06" />
-      <path d={outline.d} fill={`url(#fab-${def.pattern})`} />
-      <path d={outline.d} fill="none" stroke={shade(def.color, -70)} strokeWidth="0.055" strokeDasharray="0.16 0.11" strokeLinecap="round" />
-      {incomeCells.map(([r, c], i) => (
-        <g key={`inc${i}`} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.66)`}>
-          <circle r={0.42} fill="#FDF6E3" stroke="#5B3B20" strokeWidth={0.13} />
-          <circle r={0.09} cx={-0.14} cy={-0.14} fill="#5B3B20" />
-          <circle r={0.09} cx={0.14} cy={-0.14} fill="#5B3B20" />
-          <circle r={0.09} cx={-0.14} cy={0.14} fill="#5B3B20" />
-          <circle r={0.09} cx={0.14} cy={0.14} fill="#5B3B20" />
-        </g>
-      ))}
-    </g>
-  );
+  return <PatchGlyph patchId={patchId} orientation={orientation} cell={1} />;
 }
 
 /** Лента «дальше в пути»: все лоскутки круга после трёх доступных (горизонтальный скролл, тап — детали) */

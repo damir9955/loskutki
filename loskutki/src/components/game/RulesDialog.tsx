@@ -64,8 +64,8 @@ function RulesRu() {
 
       <Section title="Кто ходит">
         <p>
-          Ходит тот, чья булавка <b>ниже всех на дорожке времени</b> — иногда по несколько
-          ходов подряд. Если вы встали <b>точно на клетку соперника</b>, ваша булавка ложится
+          Ходит тот, чья пуговка-фишка <b>ниже всех на дорожке времени</b> — иногда по несколько
+          ходов подряд. Если вы встали <b>точно на клетку соперника</b>, ваша пуговка ложится
           <b>сверху</b> — и вы <b>ходите ещё раз</b>. В свой ход выберите одно из двух действий:
         </p>
       </Section>
@@ -76,7 +76,7 @@ function RulesRu() {
             <CoinIcon size={17} /> Действие А
           </div>
           <p className="text-[13.5px]">
-            <b>Шагнуть за пуговицами.</b> Булавка прыгает на клетку сразу за булавкой соперника —
+            <b>Шагнуть за пуговицами.</b> Ваша пуговка прыгает на клетку сразу за пуговкой соперника —
             вы получаете <b>по 1 пуговице за каждый пройденный шаг</b> и, если пересекли значки
             дохода, свой доход ещё раз. Просто, но время уходит.
           </p>
@@ -86,7 +86,7 @@ function RulesRu() {
             <ClockIcon size={17} /> Действие Б
           </div>
           <p className="text-[13.5px]">
-            <b>Купить и пришить лоскуток</b> из трёх доступных у токена. Платите пуговицы, булавка
+            <b>Купить и пришить лоскуток</b> из трёх доступных у токена. Платите пуговицы, пуговка
             едет вперёд на «часики» лоскутка. Лоскуток можно <b>поворачивать и отразить</b>.
           </p>
         </div>
@@ -147,7 +147,7 @@ function RulesRu() {
 
       <Section title="Партия и счёт">
         <p>
-          У каждого по <b>{START_BUTTONS} пуговиц</b> на старте. Партия кончается, когда обе булавки
+          У каждого по <b>{START_BUTTONS} пуговиц</b> на старте. Партия кончается, когда обе пуговки
           доходят до <b>{TIME_END}</b>. Счёт = пуговицы + плитка − 2×пустые клетки. При ничьей
           выигрывает тот, кто раньше пришёл к финишу.
         </p>
@@ -188,9 +188,10 @@ function RulesEn() {
 
       <Section title="Turn order">
         <p>
-          The player whose pin is <b>furthest behind on the time track</b> moves — sometimes
-          several turns in a row. If you land <b>exactly on the rival’s cell</b>, your pin goes
-          <b> on top</b> — and you <b>move again</b>. On your turn, choose one of two actions:
+          The player whose button token is <b>furthest behind on the time track</b> moves —
+          sometimes several turns in a row. If you land <b>exactly on the rival’s cell</b>, your
+          button goes <b>on top</b> — and you <b>move again</b>. On your turn, choose one of two
+          actions:
         </p>
       </Section>
 
@@ -200,8 +201,8 @@ function RulesEn() {
             <CoinIcon size={17} /> Action A
           </div>
           <p className="text-[13.5px]">
-            <b>Step forward for buttons.</b> The pin jumps to the cell right behind the rival’s
-            pin — you gain <b>1 button for every space passed</b> and, if you crossed income
+            <b>Step forward for buttons.</b> Your button jumps to the cell right behind the rival’s
+            button — you gain <b>1 button for every space passed</b> and, if you crossed income
             markers, your income once more. Simple, but time slips away.
           </p>
         </div>
@@ -210,8 +211,9 @@ function RulesEn() {
             <ClockIcon size={17} /> Action B
           </div>
           <p className="text-[13.5px]">
-            <b>Buy and sew a patch</b> from the three offered at the token. Pay buttons; the pin
-            travels forward by the patch’s “clocks”. A patch can be <b>rotated and mirrored</b>.
+            <b>Buy and sew a patch</b> from the three offered at the token. Pay buttons; your
+            button travels forward by the patch’s “clocks”. A patch can be <b>rotated and
+            mirrored</b>.
           </p>
         </div>
       </div>
@@ -271,9 +273,9 @@ function RulesEn() {
 
       <Section title="Game and scoring">
         <p>
-          Everyone starts with <b>{START_BUTTONS} buttons</b>. The game ends when both pins reach
-          <b> {TIME_END}</b>. Score = buttons + tile − 2×empty cells. On a tie, whoever reached
-          the finish earlier wins.
+          Everyone starts with <b>{START_BUTTONS} buttons</b>. The game ends when both button
+          tokens reach <b> {TIME_END}</b>. Score = buttons + tile − 2×empty cells. On a tie,
+          whoever reached the finish earlier wins.
         </p>
       </Section>
 

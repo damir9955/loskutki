@@ -3,15 +3,23 @@
 /**
  * Экран онлайн-режима «С другом»:
  *  — профиль (имя + реалистичный портрет),
+ *  — БЫСТРАЯ ИГРА: автопоиск — пару с тем, кто тоже ищет, или вход
+ *    в первую открытую комнату (сервер решает атомарно),
  *  — создать комнату (приватную по коду или открытую — видна в поиске),
  *  — войти по 6-значному коду,
  *  — список открытых комнат (авто-обновление),
  *  — экран ожидания соперника с крупным кодом.
  * Партия стартует, как только второй игрок входит в комнату.
+ *
+ * Стабильность: «notfound» от сервера не выкидывает из комнаты мгновенно —
+ * сервер мог рестартовать (комнаты поднимаются из снапшота), даём 3 попытки.
+ * Стрелка «назад» с экрана ожидания НЕ уничтожает комнату — вернуться можно
+ * из списка («ваша комната» → «Вернуться»). Комната отменяется только
+ * явной кнопкой «Отмена».
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Copy, Check, LogIn, Plus, RefreshCw, Users } from 'lucide-react';
+import { ArrowLeft, Copy, Check, LogIn, Plus, RefreshCw, Users, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Portrait } from './MarketRow';
@@ -24,6 +32,8 @@ import {
   mpErrorKey,
   mpJoin,
   mpListRooms,
+  mpQuick,
+  mpQuickCancel,
   mpState,
   saveProfile,
   type MpSession,
@@ -33,6 +43,10 @@ import { useToast } from '@/hooks/use-toast';
 
 const POLL_MS = 1500;
 const LIST_MS = 5000;
+const QUICK_POLL_MS = 2000;
+const BACKOFF_MAX_MS = 6000;
+/** сколько «notfound» подряд терпим (сервер поднимает комнаты из снапшота) */
+const NOTFOUND_RETRIES = 3;
 
 interface OpenRoom {
   code: string;
@@ -59,48 +73,31 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
   /** ожидание: комната создана, ждём соперника */
   const [waiting, setWaiting] = useState(session !== null);
   const [copied, setCopied] = useState(false);
-  const [checkState, setCheckState] = useState<'idle' | 'checking' | 'ok' | 'fail'>(
-    session ? 'checking' : 'idle',
-  );
+  /** сетевые сбои: не выкидываем из комнаты, показываем «переподключение» */
+  const [reconnecting, setReconnecting] = useState(false);
+  /** автопоиск: playerId держим в ref (поиск эфемерный, localStorage не нужен) */
+  const [searching, setSearching] = useState(false);
+  const [searchSec, setSearchSec] = useState(0);
+  const quickIdRef = useRef<string | null>(null);
   const playingNotified = useRef(false);
 
-  // ===== валидация сохранённой сессии (возврат после перезагрузки) =====
-  useEffect(() => {
-    if (!session) return;
-    let stopped = false;
-    (async () => {
-      try {
-        const { view } = await mpState({ code: session.code, playerId: session.playerId });
-        if (stopped) return;
-        setCheckState('ok');
-        setWaiting(true);
-        if ((view.status === 'playing' || view.status === 'finished') && !playingNotified.current) {
-          playingNotified.current = true;
-          onPlaying(session);
-        }
-      } catch {
-        if (stopped) return;
-        setCheckState('fail');
-        toast({ title: t('mp_gone') });
-        onSessionChange(null);
-        setWaiting(false);
-      }
-    })();
-    return () => {
-      stopped = true;
-    };
-     
-  }, [session?.code]);
-
-  // ===== опрос комнаты, пока ждём соперника =====
+  // ===== опрос своей комнаты (валидация сессии + ожидание соперника) =====
+  // ВАЖНО: вылет из комнаты — только если сервер подтвердил «notfound»
+  // 3 раза подряд (комната реально удалена, а не рестарт сервера).
+  // Сетевые сбои — переподключение с бэкоффом.
   useEffect(() => {
     if (!session || !waiting) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
+    let backoff = POLL_MS;
+    let notfound = 0;
     const loop = async () => {
       try {
         const { view } = await mpState({ code: session.code, playerId: session.playerId });
         if (stop) return;
+        notfound = 0;
+        backoff = POLL_MS;
+        setReconnecting(false);
         if (view.status === 'playing' || view.status === 'finished') {
           if (!playingNotified.current) {
             playingNotified.current = true;
@@ -116,26 +113,50 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
           setWaiting(false);
           return;
         }
-      } catch {
+        // status === 'waiting' — ждём дальше
+      } catch (e) {
         if (stop) return;
-        toast({ title: t('mp_gone') });
-        onSessionChange(null);
-        setWaiting(false);
-        return;
+        const errCode = (e as { code?: string })?.code ?? 'net';
+        if (errCode === 'notfound') {
+          notfound++;
+          if (notfound > NOTFOUND_RETRIES) {
+            // комната удалена на сервере — только теперь выходим
+            setReconnecting(false);
+            toast({ title: t('mp_gone') });
+            onSessionChange(null);
+            setWaiting(false);
+            return;
+          }
+          // сервер мог рестартовать и поднимает комнаты из снапшота — ждём
+          setReconnecting(true);
+        } else {
+          // временный сетевой сбой — остаёмся в комнате, пробуем снова
+          setReconnecting(true);
+          backoff = Math.min(Math.round(backoff * 1.7), BACKOFF_MAX_MS);
+        }
       }
-      if (!stop) timer = setTimeout(loop, POLL_MS);
+      if (!stop) timer = setTimeout(loop, backoff);
     };
     void loop();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !stop) {
+        clearTimeout(timer);
+        backoff = POLL_MS;
+        void loop();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       stop = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-     
+
   }, [session?.code, waiting]);
 
-  // ===== список открытых комнат (пока не ждём) =====
+  // ===== список открытых комнат (пока не ждём и не ищем) =====
   useEffect(() => {
-    if (waiting) return;
+    if (waiting || searching) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
@@ -149,13 +170,101 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
       stop = true;
       clearTimeout(timer);
     };
-  }, [waiting]);
+  }, [waiting, searching]);
+
+  // ===== секундомер автопоиска =====
+  useEffect(() => {
+    if (!searching) return;
+    const id = setInterval(() => setSearchSec((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [searching]);
+
+  // ===== цикл автопоиска: пару с другим искателем или первой открытой комнатой =====
+  useEffect(() => {
+    if (!searching) return;
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const loop = async () => {
+      const name = profile.name.trim();
+      if (name.length < 1) {
+        setSearching(false);
+        toast({ title: t('mp_bad_name') });
+        return;
+      }
+      try {
+        const res = await mpQuick({
+          playerId: quickIdRef.current ?? undefined,
+          name,
+          avatar: profile.avatar,
+        });
+        if (stop) return;
+        quickIdRef.current = res.playerId;
+        setReconnecting(false);
+        if (res.status === 'matched' && res.code) {
+          // пару составили — прыгаем в партию
+          const s: MpSession = { playerId: res.playerId, code: res.code, name, avatar: profile.avatar };
+          quickIdRef.current = null;
+          setSearching(false);
+          sound.ensure();
+          sound.tap();
+          toast({ title: t('mp_quick_found') });
+          onSessionChange(s);
+          onPlaying(s);
+          return;
+        }
+        // still searching
+      } catch (e) {
+        if (stop) return;
+        const errCode = (e as { code?: string })?.code ?? 'net';
+        if (errCode === 'badname') {
+          setSearching(false);
+          toast({ title: t('mp_bad_name') });
+          return;
+        }
+        setReconnecting(true);
+      }
+      if (!stop) timer = setTimeout(loop, QUICK_POLL_MS);
+    };
+    void loop();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !stop) {
+        clearTimeout(timer);
+        void loop();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [searching]);
+
+  const stopSearch = useCallback(() => {
+    const pid = quickIdRef.current;
+    quickIdRef.current = null;
+    setSearching(false);
+    setReconnecting(false);
+    if (pid) void mpQuickCancel(pid).catch(() => { /* сервер мог недосягаем */ });
+  }, []);
 
   const setProfileAndSave = useCallback((p: { name?: string; avatar?: string }) => {
     const next = { ...profile, ...p };
     setProfile(next);
     saveProfile(next);
   }, [profile]);
+
+  const doQuick = () => {
+    const name = profile.name.trim();
+    if (name.length < 1) {
+      toast({ title: t('mp_bad_name') });
+      return;
+    }
+    sound.ensure();
+    sound.tap();
+    setSearchSec(0);
+    setSearching(true);
+  };
 
   const doCreate = async () => {
     if (busy) return;
@@ -168,11 +277,26 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     sound.ensure();
     sound.tap();
     try {
+      // уже есть живая комната? — вторую не создаём, возвращаемся в свою
+      if (session) {
+        try {
+          const { view } = await mpState({ code: session.code, playerId: session.playerId });
+          if (view.status === 'playing' || view.status === 'finished') {
+            onPlaying(session);
+            return;
+          }
+          toast({ title: t('mp_have_room') });
+          setWaiting(true);
+          return;
+        } catch {
+          // сессия мёртвая (комната удалена) — чистим и создаём новую
+          onSessionChange(null);
+        }
+      }
       const { code: roomCode, playerId } = await mpCreate({ name, avatar: profile.avatar, isPublic });
       const s: MpSession = { playerId, code: roomCode, name, avatar: profile.avatar, isPublic };
       onSessionChange(s);
       setWaiting(true);
-      setCheckState('ok');
     } catch (e) {
       toast({ title: t(mpErrorKey((e as { code?: string })?.code ?? '')) });
     } finally {
@@ -195,13 +319,25 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     sound.ensure();
     sound.tap();
     try {
-      const { code: roomCode, playerId } = await mpJoin({ code: code.trim().toUpperCase(), name, avatar: profile.avatar });
+      const { code: roomCode, playerId } = await mpJoin({
+        code: code.trim().toUpperCase(),
+        name,
+        avatar: profile.avatar,
+        playerId: session?.playerId,
+      });
       const s: MpSession = { playerId, code: roomCode, name, avatar: profile.avatar };
       onSessionChange(s);
       // вход запускает партию сразу
       onPlaying(s);
     } catch (e) {
-      toast({ title: t(mpErrorKey((e as { code?: string })?.code ?? '')) });
+      const errCode = (e as { code?: string })?.code ?? '';
+      if (errCode === 'ownroom' && session) {
+        // это ваша собственная комната — возвращаемся в неё, а не «входим» гостем
+        toast({ title: t('mp_own_room') });
+        setWaiting(true);
+        return;
+      }
+      toast({ title: t(mpErrorKey(errCode)) });
     } finally {
       setBusy(false);
     }
@@ -209,6 +345,12 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
 
   const doJoinRoom = async (roomCode: string) => {
     if (busy) return;
+    // в собственную комнату «войти» нельзя — только вернуться в неё
+    if (session && session.code === roomCode) {
+      sound.tap();
+      setWaiting(true);
+      return;
+    }
     const name = profile.name.trim();
     if (name.length < 1) {
       toast({ title: t('mp_bad_name') });
@@ -218,12 +360,23 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     sound.ensure();
     sound.tap();
     try {
-      const { code: joined, playerId } = await mpJoin({ code: roomCode, name, avatar: profile.avatar });
+      const { code: joined, playerId } = await mpJoin({
+        code: roomCode,
+        name,
+        avatar: profile.avatar,
+        playerId: session?.playerId,
+      });
       const s: MpSession = { playerId, code: joined, name, avatar: profile.avatar };
       onSessionChange(s);
       onPlaying(s);
     } catch (e) {
-      toast({ title: t(mpErrorKey((e as { code?: string })?.code ?? '')) });
+      const errCode = (e as { code?: string })?.code ?? '';
+      if (errCode === 'ownroom' && session) {
+        toast({ title: t('mp_own_room') });
+        setWaiting(true);
+        return;
+      }
+      toast({ title: t(mpErrorKey(errCode)) });
     } finally {
       setBusy(false);
     }
@@ -253,14 +406,71 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     }
   };
 
-  // ===== экран ожидания соперника =====
-  if (session && waiting) {
+  // ===== экран автопоиска =====
+  if (searching) {
     return (
-      <div className="mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-[max(env(safe-area-inset-top),16px)]">
+      <div className="mx-auto flex min-h-svh w-full max-w-[520px] md:max-w-[660px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-[max(env(safe-area-inset-top),16px)]">
         <div className="flex w-full items-center justify-between">
           <button
             type="button"
-            onClick={() => void doCancel()}
+            onClick={stopSearch}
+            className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
+            aria-label={t('mp_back')}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="font-display text-[19px] text-foreground">{t('mp_quick_title')}</div>
+          <div className="w-9" />
+        </div>
+
+        <div className="pop-in stitched-card mt-10 flex w-full flex-col items-center px-5 py-8">
+          {/* «радар»: пульсирующие кольца + фигурки */}
+          <div className="relative flex h-28 w-28 items-center justify-center" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/25" />
+            <span className="absolute inline-flex h-4/5 w-4/5 animate-ping rounded-full bg-primary/20" style={{ animationDelay: '0.4s' }} />
+            <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-[#D9A13F]/25">
+              <Zap className="h-7 w-7 text-[#A6721F]" fill="#FFD98A" />
+            </span>
+          </div>
+          <div className="mt-5 font-display text-[22px] text-foreground">{t('mp_quick_searching')}</div>
+          <div className="mt-1.5 text-[13.5px] font-bold tabular-nums text-muted-foreground">
+            {t('mp_quick_elapsed', { n: searchSec })}
+          </div>
+          {reconnecting && (
+            <div className="mt-3 flex items-center gap-1.5 rounded-full bg-[#C33A2F]/12 px-3 py-1.5 text-[11.5px] font-bold text-[#8f2a20]">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              {t('mp_reconnect')}
+            </div>
+          )}
+          <div className="mt-4 text-center text-[12.5px] font-semibold text-muted-foreground">
+            {t('mp_quick_note')}
+          </div>
+        </div>
+
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={stopSearch}
+          className="btn-cloth w-full rounded-2xl py-3 text-[15px] font-extrabold text-destructive"
+        >
+          {t('mp_quick_cancel')}
+        </button>
+      </div>
+    );
+  }
+
+  // ===== экран ожидания соперника =====
+  if (session && waiting) {
+    return (
+      <div className="mx-auto flex min-h-svh w-full max-w-[520px] md:max-w-[660px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-[max(env(safe-area-inset-top),16px)]">
+        <div className="flex w-full items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              // назад в хаб БЕЗ отмены: комната живёт, вернуться можно из списка
+              sound.tap();
+              setWaiting(false);
+            }}
             className="btn-cloth flex h-9 w-9 items-center justify-center rounded-xl"
             aria-label={t('mp_back')}
           >
@@ -271,6 +481,12 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
         </div>
 
         <div className="pop-in stitched-card mt-8 flex w-full flex-col items-center px-5 py-6">
+          {reconnecting && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-full bg-[#C33A2F]/12 px-3 py-1.5 text-[11.5px] font-bold text-[#8f2a20]">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              {t('mp_reconnect')}
+            </div>
+          )}
           <div className="text-[13px] font-extrabold tracking-wide text-muted-foreground uppercase">
             {t('mp_code_ph')}
           </div>
@@ -325,9 +541,9 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     );
   }
 
-  // ===== хаб: профиль + создать + войти по коду + открытые комнаты =====
+  // ===== хаб: профиль + быстрая игра + создать + войти по коду + открытые комнаты =====
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-[520px] flex-col px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-[max(env(safe-area-inset-top),16px)]">
+    <div className="mx-auto flex min-h-svh w-full max-w-[520px] md:max-w-[660px] flex-col px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-[max(env(safe-area-inset-top),16px)]">
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -394,6 +610,21 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
         </div>
       </div>
 
+      {/* Быстрая игра — автопоиск */}
+      <button
+        type="button"
+        onClick={doQuick}
+        className="mt-3 flex w-full items-center gap-3 rounded-2xl border-2 border-[#8AA06F]/60 bg-[#8AA06F]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(70,100,40,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+      >
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
+          <Zap className="h-6 w-6 text-[#4e6437]" fill="#cfe0b4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[16px] font-extrabold text-foreground">{t('mp_quick')}</div>
+          <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_quick_h')}</div>
+        </div>
+      </button>
+
       {/* Создать комнату */}
       <div className="stitched-card mt-3 flex flex-col gap-2.5 p-3.5">
         <Button
@@ -451,30 +682,34 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
             {t('mp_none')}
           </div>
         )}
-        {openRooms?.map((r) => (
-          <div key={r.code} className="stitched-card flex items-center gap-2.5 p-2.5">
-            <Portrait src={avatarUrl(r.hostAvatar)} size={40} alt={r.hostName} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[14.5px] font-extrabold text-foreground">{r.hostName}</div>
-              <div className="text-[12px] font-bold tracking-[0.15em] text-muted-foreground">{r.code}</div>
+        {openRooms?.map((r) => {
+          const mine = session?.code === r.code;
+          return (
+            <div key={r.code} className="stitched-card flex items-center gap-2.5 p-2.5">
+              <Portrait src={avatarUrl(r.hostAvatar)} size={40} alt={r.hostName} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-[14.5px] font-extrabold text-foreground">{r.hostName}</span>
+                  {mine && (
+                    <span className="shrink-0 rounded-full bg-[#D9A13F]/20 px-2 py-0.5 text-[10px] font-extrabold text-[#8A5E13]">
+                      {t('mp_your_room')}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[12px] font-bold tracking-[0.15em] text-muted-foreground">{r.code}</div>
+              </div>
+              <Button
+                size="sm"
+                disabled={busy}
+                className="btn-cloth h-10 shrink-0 rounded-xl px-3.5 text-[13.5px] font-extrabold"
+                onClick={() => void doJoinRoom(r.code)}
+              >
+                {mine ? t('mp_return') : t('mp_join_btn')}
+              </Button>
             </div>
-            <Button
-              size="sm"
-              disabled={busy}
-              className="btn-cloth h-10 shrink-0 rounded-xl px-3.5 text-[13.5px] font-extrabold"
-              onClick={() => void doJoinRoom(r.code)}
-            >
-              {t('mp_join_btn')}
-            </Button>
-          </div>
-        ))}
+          );
+        })}
       </div>
-
-      {/* проверка сохранённой сессии */}
-      {checkState === 'checking' && (
-        <div className="pb-4 text-center text-[12px] font-bold text-muted-foreground">{t('mp_reconnecting')}</div>
-      )}
     </div>
   );
 }
-

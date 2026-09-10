@@ -7,6 +7,8 @@ import { outlineFor, shade } from '@/lib/game/outline';
 /**
  * Рисует лоскуток как цельный кусок ткани:
  * заливка + фактура + стёжка по краю + пуговицы дохода.
+ * Внутренних швов НЕТ — как в оригинальном Patchwork: фигурка —
+ * единый лоскут, а не сшитые из квадратов клетки.
  */
 export function PatchGlyph({
   patchId,
@@ -57,7 +59,7 @@ export function PatchGlyph({
       <path d={outline.d} fill="url(#fab-sheen)" />
       {/* обводка */}
       <path d={outline.d} fill="none" stroke={dark} strokeWidth={0.045} />
-      {/* стёжка по краю */}
+      {/* стёжка по краю (внутренних швов нет — фигурка единая, как в оригинале) */}
       <path
         d={outline.d}
         fill="none"
@@ -75,14 +77,24 @@ export function PatchGlyph({
           opacity={0.55}
         />
       )}
-      {/* пуговицы дохода */}
+      {/* пуговицы дохода: костяная пуговица с фаской и бликом */}
       {incomeCells.map(([r, c], i) => (
-        <g key={i} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.6)`}>
-          <circle r={0.42} fill="#FDF6E3" stroke="#5B3B20" strokeWidth={0.12} />
+        <g key={`btn-${i}`} transform={`translate(${c + 0.5} ${r + 0.5}) scale(0.6)`}>
+          <circle r={0.46} cy={0.07} fill="#2E1D0E" opacity={0.22} />
+          <circle r={0.42} fill="#F8F0DD" stroke="#5B3B20" strokeWidth={0.11} />
+          <circle r={0.29} fill="none" stroke="#C9B583" strokeWidth={0.06} />
           <circle r={0.1} cx={-0.13} cy={-0.13} fill="#5B3B20" />
           <circle r={0.1} cx={0.13} cy={-0.13} fill="#5B3B20" />
           <circle r={0.1} cx={-0.13} cy={0.13} fill="#5B3B20" />
           <circle r={0.1} cx={0.13} cy={0.13} fill="#5B3B20" />
+          <path
+            d="M -0.3 -0.14 A 0.33 0.33 0 0 1 -0.06 -0.3"
+            stroke="#ffffff"
+            strokeWidth={0.06}
+            opacity={0.55}
+            fill="none"
+            strokeLinecap="round"
+          />
         </g>
       ))}
       </g>

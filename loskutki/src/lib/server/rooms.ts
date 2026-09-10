@@ -2,9 +2,32 @@
  * Серверный стор онлайн-комнат «Лоскутки».
  *
  * Одиночный процесс Next.js → держим комнаты в Map на globalThis
- * (переживает HMR в dev). Состояние партии — чистый GameState из движка:
- * сервер валидирует и применяет ходы, отдаёт каждому игроку «повёрнутую»
- * копию (зритель всегда сидит на месте 0).
+ * (переживает HML в dev) ПЛЮС снапшот в JSON-файл на диске —
+ * комнаты переживают и полный рестарт сервера (dev-перезапуск, деплой):
+ * игроки не «вылетают» из партии, сессия в localStorage возвращает их назад.
+ * Состояние партии — чистый GameState из движка: сервер валидирует и
+ * применяет ходы, отдаёт каждому игроку «повёрнутую» копию (зритель
+ * всегда сидит на месте 0).
+ *
+ * Стабильность комнат:
+ *  — в поиск открытых комнат попадают ТОЛЬКО живые (хост опрашивал < 20с),
+ *    «призраки» закрытых вкладок не висят в списке;
+ *  — войти в СВОЮ комнату нельзя (ownroom) — вместо этого «вернуться»;
+ *  — ждущая комната без опросов хоста > 5 мин удаляется, партия — 30 мин;
+ *  — снапшот пишется СИНХРОННО сразу после каждого изменения комнаты —
+ *    рестарт сервера в любой момент не теряет ни одного хода;
+ *  — после рестарта хода не «просрочиваются» скопом: каждому играющему
+ *    даётся свежий дедлайн (грейс), а не гигантская серия автопассов.
+ *
+ * Таймер хода и «пропал игрок»:
+ *  — дедлайн тикает, только пока владелец хода на связи (опрашивает комнату);
+ *  — телефон в кармане / перекинули вкладку → таймер приостанавливается
+ *    (до 90 секунд отсутствия), при возврате — 90 секунд на ход;
+ *  — если владельца нет дольше 90с — ход просрочивается как обычно.
+ *
+ * Быстрый матч (автопоиск):
+ *  — очередь quick-match: два искавших соединяются в приватную комнату;
+ *  — если искателей нет — подключаемся к первой живой открытой комнате.
  *
  * Лимит времени на ход: 3 минуты (MP_TURN_MS). Просроченный ход
  * автоматически заменяется шагом вперёд (advance), кожаный лоскуток
@@ -12,6 +35,8 @@
  * к комнате (poll/ход/лист комнат).
  */
 
+import { readFileSync, writeFileSync } from 'fs';
+import path from 'path';
 import { advanceAction, buyAndPlace, createGame, placeLeather } from '@/lib/game/engine';
 import type { GameEvent, GameState, MpRoomView, NetAction } from '@/lib/game/types';
 import { BOARD_SIZE } from '@/lib/game/constants';
@@ -24,8 +49,13 @@ export function turnMs(): number {
 }
 
 const CONNECTED_MS = 12_000; // «на связи» = опрашивал меньше 12с назад
-const ROOM_TTL_MS = 30 * 60_000; // брошенные комнаты чистим через 30 минут
+const ROOM_TTL_MS = 30 * 60_000; // брошенные партии чистим через 30 минут
+const WAITING_HOST_TTL_MS = 5 * 60_000; // ждущая комната без хоста живёт 5 минут
+const LIST_ALIVE_MS = 20_000; // в поиске показываем только живые комнаты
 const MAX_AUTO_TICKS = 80; // предохранитель цикла автопассов
+const OWNER_ABSENT_CAP_MS = 90_000; // дольше — владелец хода считается ушедшим, автопасс
+const RESUME_GRANT_MS = 90_000; // вернулся после паузы — минимум времени на ход
+const QUICK_ALIVE_MS = 10_000; // искатель живёт в очереди без опросов 10с
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -50,6 +80,8 @@ export interface MpRoom {
   gameSeq: number;
   turnDeadline: number | null;
   turnSig: string | null;
+  /** таймер хода приостановлен: владелец хода пропал (телефон в кармане) */
+  frozen: boolean;
   lastEvents: GameEvent[];
   lastEventsVersion: number;
   timedOutSeat: number | null;
@@ -61,11 +93,86 @@ export interface MpRoom {
   updatedAt: number;
 }
 
-// ===== глобальный стор (переживает HMR) =====
+// ===== глобальный стор (переживает HMR + рестарты через снапшот на диске) =====
 
-const g = globalThis as unknown as { __loskutkiRooms?: Map<string, MpRoom> };
-const rooms: Map<string, MpRoom> = g.__loskutkiRooms ?? new Map();
+const g = globalThis as unknown as {
+  __loskutkiRooms?: Map<string, MpRoom>;
+  __loskutkiQuick?: Map<string, QuickEntry>;
+};
+const rooms: Map<string, MpRoom> = g.__loskutkiRooms ?? hydrateFromDisk();
 g.__loskutkiRooms = rooms;
+
+/** Очередь быстрого матча (автопоиск): playerId → искатель */
+export interface QuickEntry {
+  playerId: string;
+  name: string;
+  avatar: string;
+  lastPoll: number;
+  /** пары уже составлена: ждём, пока искатель заберёт код комнаты */
+  matchedCode: string | null;
+}
+const quickQueue: Map<string, QuickEntry> = g.__loskutkiQuick ?? new Map();
+g.__loskutkiQuick = quickQueue;
+
+function storePath(): string {
+  return process.env.LOSKUTKI_MP_STORE ?? path.join(process.cwd(), '.mp-rooms.json');
+}
+
+/** Загрузить комнаты из снапшота (после полного рестарта процесса).
+ *  Играющим комнатам даём СВЕЖИЙ дедлайн хода — рестарт не должен
+ *  просрочить чужие ходы и устроить серию автопассов. */
+function hydrateFromDisk(): Map<string, MpRoom> {
+  const map = new Map<string, MpRoom>();
+  try {
+    const raw = readFileSync(storePath(), 'utf8');
+    const arr = JSON.parse(raw) as MpRoom[];
+    if (Array.isArray(arr)) {
+      const now = Date.now();
+      for (const r of arr) {
+        if (r && typeof r.code === 'string' && typeof r.host?.id === 'string') {
+          if (r.status === 'playing' && r.state) {
+            r.turnDeadline = now + turnMs();
+            r.turnSig = null;
+          }
+          // оба ушли до рестарта — комнату не оживляем
+          if (r.status === 'abandoned' || (r.host.leftAt !== null && r.guest?.leftAt != null)) {
+            continue;
+          }
+          map.set(r.code, r);
+        }
+      }
+    }
+  } catch {
+    /* нет файла / битый файл — стартуем с пустого стора */
+  }
+  return map;
+}
+
+/** Сохранить снапшот — СИНХРОННО сразу после изменения комнаты:
+ *  рестарт процесса в любой момент не теряет ни одного хода.
+ *  Файл маленький (несколько комнат), запись — доли миллисекунды. */
+function persist(): void {
+  try {
+    writeFileSync(storePath(), JSON.stringify([...rooms.values()]));
+  } catch {
+    /* недоступный диск — деградируем до памяти */
+  }
+}
+
+export function __resetRoomsForTests(): void {
+  rooms.clear();
+  quickQueue.clear();
+}
+
+/** Тесты: прочитать снапшот с диска как новый процесс. */
+export function __roomsOnDisk(): MpRoom[] {
+  try {
+    const arr = JSON.parse(readFileSync(storePath(), 'utf8')) as MpRoom[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
 
 // ===== утилиты =====
 
@@ -127,13 +234,18 @@ function bumpVersion(room: MpRoom) {
   room.updatedAt = Date.now();
 }
 
-/** Список открытых комнат + чистка протухших */
+/** Список ОТКРЫТЫХ комнат + чистка протухших.
+ *  Показываем только живые: хост опрашивал комнату < 20с назад —
+ *  «призраки» закрытых вкладок не попадают в поиск. */
 export function listRooms(): Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }> {
   sweep();
+  const now = Date.now();
   const out: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }> = [];
   for (const r of rooms.values()) {
     if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null) {
-      out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, createdAt: r.createdAt });
+      if (now - r.host.lastPoll <= LIST_ALIVE_MS) {
+        out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, createdAt: r.createdAt });
+      }
     }
   }
   return out.sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
@@ -142,9 +254,15 @@ export function listRooms(): Array<{ code: string; hostName: string; hostAvatar:
 function sweep() {
   const now = Date.now();
   for (const [code, r] of rooms) {
+    if (r.status === 'waiting') {
+      // ждущую комнату без хоста удаляем: 5 минут без опросов — хост ушёл
+      if (now - Math.max(r.host.lastPoll, r.createdAt) > WAITING_HOST_TTL_MS) {
+        rooms.delete(code);
+      }
+      continue;
+    }
     const stale = now - Math.max(r.updatedAt, r.host.lastPoll, r.guest?.lastPoll ?? 0) > ROOM_TTL_MS;
-    const waitingTooOld = r.status === 'waiting' && now - r.createdAt > ROOM_TTL_MS;
-    if (stale || waitingTooOld) rooms.delete(code);
+    if (stale) rooms.delete(code);
   }
 }
 
@@ -167,6 +285,7 @@ export function createRoom(input: { name: unknown; avatar: unknown; isPublic: un
     gameSeq: 0,
     turnDeadline: null,
     turnSig: null,
+    frozen: false,
     lastEvents: [],
     lastEventsVersion: -1,
     timedOutSeat: null,
@@ -178,10 +297,11 @@ export function createRoom(input: { name: unknown; avatar: unknown; isPublic: un
     updatedAt: Date.now(),
   };
   rooms.set(room.code, room);
+  persist();
   return { code: room.code, playerId: room.host.id };
 }
 
-export function joinRoom(input: { code: unknown; name: unknown; avatar: unknown }): {
+export function joinRoom(input: { code: unknown; name: unknown; avatar: unknown; playerId?: unknown }): {
   code: string;
   playerId: string;
 } {
@@ -190,7 +310,11 @@ export function joinRoom(input: { code: unknown; name: unknown; avatar: unknown 
   if (name.length < 1) throw 'badname';
   const room = rooms.get(code);
   if (!room) throw 'notfound';
+  // хост не может «войти» в собственную комнату как гость — иначе партия
+  // начнётся против самого себя и друзья уже не смогут присоединиться
+  if (typeof input.playerId === 'string' && input.playerId === room.host.id) throw 'ownroom';
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
+  if (room.host.leftAt !== null) throw 'gone';
   tick(room);
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
 
@@ -201,6 +325,7 @@ export function joinRoom(input: { code: unknown; name: unknown; avatar: unknown 
   room.status = 'playing';
   room.gameSeq++;
   room.turnSig = null;
+  room.frozen = false;
   room.lastEvents = [];
   room.lastEventsVersion = room.version;
   room.timedOutSeat = null;
@@ -209,6 +334,7 @@ export function joinRoom(input: { code: unknown; name: unknown; avatar: unknown 
   room.rematchGuest = false;
   bumpVersion(room);
   resetDeadline(room);
+  persist();
   return { code: room.code, playerId: room.guest.id };
 }
 
@@ -216,10 +342,23 @@ export function getRoom(code: string): MpRoom | null {
   return rooms.get(code.trim().toUpperCase()) ?? null;
 }
 
-/** Отметить «на связи» (вызывается при каждом poll) */
+/** Отметить «на связи» (вызывается при каждом poll).
+ *  Если вернулся владелец хода с замороженным таймером — выдать ему
+ *  гарантированные RESUME_GRANT_MS на обдумывание. */
 export function touch(room: MpRoom, seat: 0 | 1) {
+  const now = Date.now();
   const p = seat === 0 ? room.host : room.guest;
-  if (p) p.lastPoll = Date.now();
+  if (p) p.lastPoll = now;
+  if (
+    room.frozen &&
+    room.status === 'playing' &&
+    room.state &&
+    room.turnDeadline !== null &&
+    turnOwner(room.state) === seat
+  ) {
+    room.frozen = false;
+    if (room.turnDeadline < now + RESUME_GRANT_MS) room.turnDeadline = now + RESUME_GRANT_MS;
+  }
 }
 
 /** Выход игрока: waiting → комната закрывается; playing → «соперник ушёл» */
@@ -228,6 +367,7 @@ export function leaveRoom(room: MpRoom, playerId: string): void {
   if (seat === null) throw 'notfound';
   if (room.status === 'waiting') {
     rooms.delete(room.code);
+    persist();
     return;
   }
   const p = seat === 0 ? room.host : room.guest;
@@ -240,6 +380,7 @@ export function leaveRoom(room: MpRoom, playerId: string): void {
   const other = seat === 0 ? room.guest : room.host;
   const otherGone = !other || other.leftAt !== null;
   if (otherGone) rooms.delete(room.code);
+  persist();
 }
 
 /** Хост отменяет ожидающую комнату */
@@ -247,6 +388,7 @@ export function cancelRoom(room: MpRoom, playerId: string): void {
   const seat = seatOf(room, playerId);
   if (seat !== 0 || room.status !== 'waiting') throw 'notfound';
   rooms.delete(room.code);
+  persist();
 }
 
 // ===== ходы и таймауты =====
@@ -281,7 +423,7 @@ export function applyAction(room: MpRoom, seat: 0 | 1, action: NetAction): void 
   commit(room, res.state, res.events);
 }
 
-function commit(room: MpRoom, state: GameState, events: GameEvent[]) {
+function commit(room: MpRoom, state: GameState, events: GameEvent[]): void {
   room.state = state;
   room.lastEvents = events;
   bumpVersion(room);
@@ -293,9 +435,13 @@ function commit(room: MpRoom, state: GameState, events: GameEvent[]) {
     else if (w === 1) room.wins[1]++;
   }
   resetDeadline(room);
+  persist();
 }
 
-/** Просроченные ходы играют сами (advance; кожаный — в первую пустую клетку) */
+/** Просроченные ходы играют сами (advance; кожаный — в первую пустую клетку).
+ *  НО: если владелец хода пропал (не опрашивает комнату) — таймер
+ *  приостанавливается до OWNER_ABSENT_CAP_MS: телефон в кармане не должен
+ *  проигрывать партию за игрока. Дольше 90с отсутствия — автопасс как раньше. */
 export function tick(room: MpRoom): void {
   if (room.status !== 'playing' || !room.state) return;
   let guard = 0;
@@ -303,6 +449,19 @@ export function tick(room: MpRoom): void {
     const st = room.state;
     if (st.phase === 'gameover') break;
     const owner = turnOwner(st);
+    const ownerPlayer = owner === 0 ? room.host : room.guest;
+    const absent = ownerPlayer ? Date.now() - ownerPlayer.lastPoll : Infinity;
+    const explicitLeft = ownerPlayer ? ownerPlayer.leftAt !== null : true;
+    // владелец на связи (только что опрашивал) или отсутствует дольше лимита,
+    // или ушёл сознательно — просрочка честная: автопасс
+    // (законно истекшее время при живом опросе: lastPoll свежий)
+    if (!explicitLeft && absent > CONNECTED_MS && absent < OWNER_ABSENT_CAP_MS) {
+      // пропал совсем недавно — замораживаем таймер и ждём его
+      room.frozen = true;
+      room.turnDeadline = Date.now() + 5_000; // перепроверим через 5с
+      persist();
+      break;
+    }
     let res: { state: GameState; events: GameEvent[] };
     if (st.phase === 'placing') {
       const board = st.players[owner].board;
@@ -320,6 +479,7 @@ export function tick(room: MpRoom): void {
         break;
       }
     }
+    room.frozen = false;
     commit(room, res.state, res.events);
     room.timedOutSeat = owner;
     room.timedOutVersion = room.version;
@@ -343,6 +503,7 @@ export function requestRematch(room: MpRoom, playerId: string): { started: boole
     room.status = 'playing';
     room.gameSeq++;
     room.turnSig = null;
+    room.frozen = false;
     room.rematchHost = false;
     room.rematchGuest = false;
     room.lastEvents = [];
@@ -353,9 +514,11 @@ export function requestRematch(room: MpRoom, playerId: string): { started: boole
     if (room.guest) room.guest.leftAt = null;
     bumpVersion(room);
     resetDeadline(room);
+    persist();
     return { started: true };
   }
   bumpVersion(room);
+  persist();
   return { started: false };
 }
 
@@ -448,6 +611,8 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
     version: room.version,
     gameSeq: room.gameSeq,
     turnDeadline: room.status === 'playing' ? room.turnDeadline : null,
+    /** таймер хода приостановлен (владелец хода не на связи) */
+    turnPaused: room.status === 'playing' && room.frozen,
     serverNow: now,
     state: room.state ? rotatedState(room.state, seat, room) : null,
     events: viewEvents,
@@ -456,4 +621,147 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
     timedOutSeat: room.timedOutSeat === null ? null : seat === 1 ? swap(room.timedOutSeat) : room.timedOutSeat,
     timedOutVersion: room.timedOutVersion,
   };
+}
+
+// ===== быстрый матч (автопоиск) =====
+
+/** подчистить протухших искателей (не опрашивали очередь > QUICK_ALIVE_MS) */
+function pruneQuick() {
+  const now = Date.now();
+  for (const [id, e] of quickQueue) {
+    if (now - e.lastPoll > QUICK_ALIVE_MS) quickQueue.delete(id);
+  }
+}
+
+/** первая живая открытая комната (критерии — как в поиске) */
+function firstLivePublicRoom(): MpRoom | null {
+  const now = Date.now();
+  let best: MpRoom | null = null;
+  for (const r of rooms.values()) {
+    if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null) {
+      if (now - r.host.lastPoll <= LIST_ALIVE_MS && (!best || r.createdAt < best.createdAt)) {
+        best = r;
+      }
+    }
+  }
+  return best;
+}
+
+/** посадить гостя в ждущую комнату и стартовать партию */
+function seatGuest(room: MpRoom, pid: string, name: string, avatar: string): void {
+  room.guest = { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null };
+  room.state = createGame({
+    seed: (Math.floor(Math.random() * 1e9) ^ Date.now()) >>> 0,
+    mode: 'online',
+    botLevel: 'fedor',
+    firstPlayer: Math.random() < 0.5 ? 0 : 1,
+  });
+  room.status = 'playing';
+  room.gameSeq++;
+  room.turnSig = null;
+  room.frozen = false;
+  room.lastEvents = [];
+  room.lastEventsVersion = room.version;
+  room.timedOutSeat = null;
+  room.timedOutVersion = null;
+  room.rematchHost = false;
+  room.rematchGuest = false;
+  bumpVersion(room);
+  resetDeadline(room);
+  persist();
+}
+
+/** новая комната с парой (host = искатель из очереди, guest = я) */
+function pairRoom(host: QuickEntry, guestId: string, guestName: string, guestAvatar: string): MpRoom {
+  const room: MpRoom = {
+    code: genCode(),
+    host: { id: host.playerId, name: host.name, avatar: host.avatar, lastPoll: Date.now(), leftAt: null },
+    guest: null,
+    isPublic: false,
+    status: 'waiting',
+    state: null,
+    version: 0,
+    gameSeq: 0,
+    turnDeadline: null,
+    turnSig: null,
+    frozen: false,
+    lastEvents: [],
+    lastEventsVersion: -1,
+    timedOutSeat: null,
+    timedOutVersion: null,
+    rematchHost: false,
+    rematchGuest: false,
+    wins: [0, 0],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  rooms.set(room.code, room);
+  seatGuest(room, guestId, guestName, guestAvatar);
+  return room;
+}
+
+/**
+ * Заявка на быстрый матч. Порядок подбора:
+ *  1) пару уже составили → забрать код комнаты (я — хост);
+ *  2) другой живой искатель в очереди → составить пару (я — гость);
+ *  3) живая открытая комната → войти в неё гостем;
+ *  4) никого → встать в очередь и ждать (клиент опрашивает каждые ~2с).
+ * Повторный вызов с тем же playerId обновляет присутствие (self-healing
+ * после рестарта сервера: очередь в памяти, игрок просто встанет заново).
+ */
+export function quickMatch(input: { playerId?: unknown; name: unknown; avatar: unknown }): {
+  status: 'matched' | 'waiting';
+  code?: string;
+  playerId: string;
+} {
+  const name = cleanName(input.name);
+  if (name.length < 1) throw 'badname';
+  pruneQuick();
+  const pid = typeof input.playerId === 'string' && input.playerId.length > 8 ? input.playerId : genId();
+  const avatar = cleanAvatar(input.avatar);
+
+  const mine = quickQueue.get(pid);
+  if (mine) {
+    mine.name = name;
+    mine.avatar = avatar;
+    mine.lastPoll = Date.now();
+    if (mine.matchedCode) {
+      const code = mine.matchedCode;
+      quickQueue.delete(pid);
+      return { status: 'matched', code, playerId: pid };
+    }
+    // пока ждали — появилась открытая комната? входим в неё
+    const open = firstLivePublicRoom();
+    if (open) {
+      quickQueue.delete(pid);
+      seatGuest(open, pid, name, avatar);
+      return { status: 'matched', code: open.code, playerId: pid };
+    }
+    return { status: 'waiting', playerId: pid };
+  }
+
+  // другой живой искатель → пара в новой приватной комнате (я — гость)
+  for (const e of quickQueue.values()) {
+    if (e.matchedCode === null) {
+      const room = pairRoom(e, pid, name, avatar);
+      e.matchedCode = room.code;
+      return { status: 'matched', code: room.code, playerId: pid };
+    }
+  }
+
+  // живая открытая комната → сразу входим гостем
+  const open = firstLivePublicRoom();
+  if (open) {
+    seatGuest(open, pid, name, avatar);
+    return { status: 'matched', code: open.code, playerId: pid };
+  }
+
+  // никого — встаём в очередь
+  quickQueue.set(pid, { playerId: pid, name, avatar, lastPoll: Date.now(), matchedCode: null });
+  return { status: 'waiting', playerId: pid };
+}
+
+/** Отменить автопоиск */
+export function quickCancel(playerId: unknown): void {
+  if (typeof playerId === 'string' && playerId) quickQueue.delete(playerId);
 }

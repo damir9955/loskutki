@@ -372,7 +372,7 @@ export function buyAndPlace(
   state.tokenIndex = (item.circleIndex - 1 + state.circle.length) % state.circle.length;
   // 5. движение времени
   moveTime(state, playerIdx, p.time + patch.time, false, events);
-  // 5а. встали точно на клетку соперницы — булавка ложится СВЕРХУ и ходившая
+  // 5а. встали точно на клетку соперницы — пуговка ложится СВЕРХУ и ходившая
   // ХОДИТ ЕЩЁ РАЗ (пуговицы за саму посадку правилами Patchwork не положено)
   const other = state.players[1 - playerIdx];
   if (p.time === other.time && p.time > 0) {

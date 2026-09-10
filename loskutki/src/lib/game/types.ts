@@ -118,6 +118,8 @@ export interface MpRoomView {
   version: number;
   gameSeq: number;
   turnDeadline: number | null;
+  /** таймер хода приостановлен: владелец хода не на связи (телефон в кармане) */
+  turnPaused: boolean;
   serverNow: number;
   state: GameState | null;
   events: GameEvent[] | null;

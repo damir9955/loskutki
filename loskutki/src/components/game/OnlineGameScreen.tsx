@@ -6,12 +6,19 @@
  * автопассит просроченные), реваншами и выходом соперника.
  * Внутри рендерит обычный GameScreen с пропом online.
  *
- * Важные инварианты:
+ * Стабильность связи (главные правила):
+ *  — УСТАРЕВШИЕ poll-ответы отбрасываются. Пока ход летел на сервер,
+ *    очередной poll мог уже запроситься и вернуться СТАРЫМ состоянием —
+ *    такой ответ откатил бы доску назад («мой ход пропал»). Теперь вид
+ *    применяется только если его версия не старше уже применённой
+ *    (version и gameSeq монотонны от одного сервера).
+ *  — «notfound» не выкидывает мгновенно: сервер мог рестартовать и
+ *    сейчас поднимет комнаты из снапшота — даём 3 попытки (~5с).
+ *  — Сбой связи не стирает сессию: после возврата в хаб игроку снова
+ *    предложат вернуться в партию (сессия в localStorage жива, пока
+ *    он сам не выйдет осознанно).
  *  — applyView СТАБИЛЕН (рефы вместо стейта в зависимостях) — иначе цикл
- *    опроса перезапускается на каждый рендер и циклов становится много;
- *  — каждый запуск цикла опроса имеет собственный флаг отмены (локальная
- *    переменная эффекта, не общий ref);
- *  — submit защищён от двойного срабатывания ( submittingRef ).
+ *    опроса перезапускается на каждый рендер и циклов становится много.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,10 +32,15 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
 const POLL_MS = 1500;
+/** сколько «notfound» подряд терпим (сервер мог рестартовать — он поднимет
+ *  комнаты из снапшота; пара секунд здесь спасает партию) */
+const NOTFOUND_RETRIES = 3;
 
 export interface OnlineGameScreenProps {
   session: MpSession;
-  onExit: () => void;
+  /** 'user' — осознанный выход (сессия очищается); 'error' — сбой: сессия
+   *  сохраняется, из хаба можно вернуться в партию */
+  onExit: (reason: 'user' | 'error') => void;
   onOpenRules: () => void;
 }
 
@@ -41,12 +53,15 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
   const [rematchWaiting, setRematchWaiting] = useState(false);
   /** для «возврата в комнату» пока не пришёл первый poll */
   const [connecting, setConnecting] = useState(true);
+  /** нет связи с сервером — показываем плашку переподключения */
+  const [netLost, setNetLost] = useState(false);
 
   const seenVersion = useRef(-1);
   const seenGameSeq = useRef(-1);
   const lastTimeoutToast = useRef<number | null>(null);
   const rematchNotified = useRef(false);
   const submitting = useRef(false);
+  const notfoundStreak = useRef(0);
   /** последние события чужого хода (и их номер) — уходят в online-контекст */
   const remoteRef = useRef<{ events: GameEvent[] | null; id: number }>({ events: null, id: 0 });
   const applyViewRef = useRef<(view: MpRoomView, opts: { fromSubmit: boolean }) => void>(() => {});
@@ -60,6 +75,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
       submitting.current = true;
       try {
         const { view: v2 } = await mpMove({ code: session.code, playerId: session.playerId, action });
+        notfoundStreak.current = 0;
         applyViewRef.current(v2, { fromSubmit: true });
         if (v2.state && v2.events && v2.eventsVersion === v2.version) {
           return { ok: true, state: v2.state, events: v2.events };
@@ -87,51 +103,58 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         return;
       }
       setConnecting(false);
-      const offset = view.serverNow - Date.now();
 
-      // новая партия (реванш) — перемонтируем GameScreen
-      if (view.gameSeq !== seenGameSeq.current) {
-        seenGameSeq.current = view.gameSeq;
-        remoteRef.current = { events: null, id: 0 };
-        setGameSeq(view.gameSeq);
-        setRematchWaiting(false);
-        rematchNotified.current = false;
-      }
+      // УСТАРЕВШИЙ ответ (гонка poll vs ход): версия старше уже применённой —
+      // пропускаем состояние и события, но онлайн-мету (на связи/нет) обновляем
+      const stale =
+        view.gameSeq < seenGameSeq.current ||
+        (view.gameSeq === seenGameSeq.current && view.version < seenVersion.current);
 
-      const isNew = view.version > seenVersion.current;
-      if (view.version > seenVersion.current) seenVersion.current = view.version;
+      if (!stale) {
+        // новая партия (реванш) — перемонтируем GameScreen
+        if (view.gameSeq !== seenGameSeq.current) {
+          seenGameSeq.current = view.gameSeq;
+          remoteRef.current = { events: null, id: 0 };
+          setGameSeq(view.gameSeq);
+          setRematchWaiting(false);
+          rematchNotified.current = false;
+        }
+        const isNew = view.version > seenVersion.current;
+        if (view.version > seenVersion.current) seenVersion.current = view.version;
 
-      if (view.state) setGame(view.state);
+        if (view.state) setGame(view.state);
 
-      // события ходов: свои приходят из submit (там и проигрываются),
-      // чужие — poll'ом: показываем через remoteEvents один раз
-      if (!opts.fromSubmit && isNew && view.events && view.events.length > 0 && view.eventsVersion === view.version) {
-        remoteRef.current = { events: view.events, id: remoteRef.current.id + 1 };
-      }
+        // события ходов: свои приходят из submit (там и проигрываются),
+        // чужие — poll'ом: показываем через remoteEvents один раз
+        if (!opts.fromSubmit && isNew && view.events && view.events.length > 0 && view.eventsVersion === view.version) {
+          remoteRef.current = { events: view.events, id: remoteRef.current.id + 1 };
+        }
 
-      // тост про просроченный ход (по версии — один раз)
-      if (
-        view.timedOutVersion !== null &&
-        view.timedOutSeat !== null &&
-        view.timedOutVersion !== lastTimeoutToast.current
-      ) {
-        lastTimeoutToast.current = view.timedOutVersion;
-        if (view.timedOutSeat === 0) {
-          toast({ title: t('mp_timeout_you_t'), description: t('mp_timeout_you_d') });
-        } else {
-          toast({ title: t('mp_timeout_foe_t'), description: t('mp_timeout_foe_d') });
+        // тост про просроченный ход (по версии — один раз)
+        if (
+          view.timedOutVersion !== null &&
+          view.timedOutSeat !== null &&
+          view.timedOutVersion !== lastTimeoutToast.current
+        ) {
+          lastTimeoutToast.current = view.timedOutVersion;
+          if (view.timedOutSeat === 0) {
+            toast({ title: t('mp_timeout_you_t'), description: t('mp_timeout_you_d') });
+          } else {
+            toast({ title: t('mp_timeout_foe_t'), description: t('mp_timeout_foe_d') });
+          }
+        }
+
+        // реванш: соперник нажал — мягко напомнить один раз
+        if (view.status === 'finished' && view.rematchFoe && !view.rematchMe && !rematchNotified.current) {
+          rematchNotified.current = true;
+          toast({ title: t('mp_rematch_asked') });
+        }
+        if (view.status === 'finished') {
+          setRematchWaiting(view.rematchMe);
         }
       }
 
-      // реванш: соперник нажал — мягко напомнить один раз
-      if (view.status === 'finished' && view.rematchFoe && !view.rematchMe && !rematchNotified.current) {
-        rematchNotified.current = true;
-        toast({ title: t('mp_rematch_asked') });
-      }
-      if (view.status === 'finished') {
-        setRematchWaiting(view.rematchMe);
-      }
-
+      const offset = view.serverNow - Date.now();
       setOnline({
         roomCode: view.code,
         opponent: {
@@ -141,6 +164,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
           left: view.foe?.left ?? false,
         },
         turnDeadline: view.turnDeadline,
+        turnPaused: view.turnPaused,
         clockOffset: offset,
         submit,
         remoteEvents: remoteRef.current.events,
@@ -163,16 +187,26 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
       try {
         const { view } = await mpState({ code: session.code, playerId: session.playerId });
         if (cancelled) return;
+        notfoundStreak.current = 0;
+        setNetLost(false);
         applyViewRef.current(view, { fromSubmit: false });
       } catch (e) {
         if (cancelled) return;
         const code = (e as { code?: string })?.code ?? 'net';
         if (code === 'notfound') {
-          toast({ title: t('mp_gone') });
-          onExit();
-          return;
+          notfoundStreak.current++;
+          if (notfoundStreak.current > NOTFOUND_RETRIES) {
+            // комната действительно исчезла — уходим, но сессию НЕ стираем:
+            // вдруг это наш сетевой сбой — из хаба можно попробовать вернуться
+            toast({ title: t('mp_gone') });
+            onExit('error');
+            return;
+          }
+          // сервер мог рестартовать и поднимает комнаты из снапшота — ждём
+        } else {
+          setNetLost(true);
+          // сетевая ошибка — попробуем ещё раз
         }
-        // сетевая ошибка — попробуем ещё раз
       }
       if (!cancelled) timer = setTimeout(poll, POLL_MS);
     };
@@ -189,8 +223,8 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-     
-  }, [session.code, session.playerId]);
+
+  }, [session.code, session.playerId, onExit]);
 
   // ===== выход из партии =====
   const doLeave = useCallback(
@@ -200,7 +234,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         /* комната могла закрыться */
       });
       sound.tap();
-      onExit();
+      onExit('user');
     },
     [session.code, session.playerId, onExit],
   );
@@ -229,7 +263,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
           <Button
             size="lg"
             className="btn-wood mt-5 h-13 w-full rounded-2xl text-[16px] font-extrabold"
-            onClick={onExit}
+            onClick={() => onExit('user')}
           >
             {t('mp_back')}
           </Button>
@@ -254,6 +288,17 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
 
   return (
     <>
+      {netLost && (
+        <div className="pointer-events-none fixed inset-x-0 top-[max(env(safe-area-inset-top),10px)] z-40 flex justify-center px-4">
+          <div className="flex items-center gap-2 rounded-full bg-[#C33A2F]/92 px-4 py-2 shadow-xl">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
+            </span>
+            <span className="text-[12.5px] font-extrabold text-white">{t('mp_reconnect')}</span>
+          </div>
+        </div>
+      )}
       <GameScreen
         key={`online-${gameSeq}`}
         state={game}

@@ -11,7 +11,10 @@ import {
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { BOT_PERSONAS, PATCHES, type BotLevel } from '@/lib/game/constants';
+import { orientationCells } from './PatchGlyph';
+import { orientationsFor } from '@/lib/game/placement';
 import { BotAvatar, GlyphDirect } from './MarketRow';
+import { PatchGlyph } from './PatchGlyph';
 import {
   ACHIEVEMENTS,
   loadStore,
@@ -39,26 +42,66 @@ import { useToast } from '@/hooks/use-toast';
 import { MiniQuilt } from './QuiltBoard';
 import type { GameState } from '@/lib/game/types';
 
-/** Логотип-нашивка */
+/** Раскладка лого — как на иконке игры: реальные фигурки, упакованные
+ *  без дыр в полотно 6×6 (сгенерирована scripts/make_icon.ts) */
+const LOGO_PACK: ReadonlyArray<{ id: number; o: number; r: number; c: number }> = [
+  { id: 14, o: 0, r: 0, c: 0 },
+  { id: 28, o: 0, r: 0, c: 2 },
+  { id: 20, o: 0, r: 0, c: 4 },
+  { id: 0, o: 1, r: 0, c: 5 },
+  { id: 19, o: 0, r: 1, c: 0 },
+  { id: 17, o: 0, r: 2, c: 3 },
+  { id: 26, o: 3, r: 3, c: 1 },
+  { id: 18, o: 4, r: 3, c: 4 },
+  { id: 2, o: 0, r: 5, c: 0 },
+];
+const LOGO_BUTTON_INDEX = 4;
+
+/** Логотип-нашивка: то же лоскутное полотно, что на иконке игры —
+ *  тетромино-фигурки игры без дыр + пуговица, как на обложке Patchwork */
 function LogoMark({ size = 92 }: { size?: number }) {
+  const INSET = 0.06;
+  const sc = 1 - INSET * 2;
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden>
-      <path d="M 14 24 h 26 v 26 h -13 v 13 h -13 z" fill="#C0603A" stroke="#8E4224" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="M 14 24 h 26 v 26 h -13 v 13 h -13 z" fill="none" stroke="#7A3B1D" strokeWidth="1.6" strokeDasharray="3.4 2.2" />
-      <path d="M 56 28 h 10 v 10 h 10 v 10 h -10 v 10 h -10 v -10 h -10 v -10 h 10 z" fill="#3E7C74" stroke="#2C5A54" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="M 56 28 h 10 v 10 h 10 v 10 h -10 v 10 h -10 v -10 h -10 v -10 h 10 z" fill="none" stroke="#1F443F" strokeWidth="1.6" strokeDasharray="3.4 2.2" />
-      <rect x="56" y="68" width="22" height="22" rx="4" fill="#D9A13F" stroke="#A6721F" strokeWidth="2.4" />
-      <circle cx="61" cy="73" r="1.6" fill="#8A5E13" />
-      <circle cx="73" cy="73" r="1.6" fill="#8A5E13" />
-      <circle cx="61" cy="85" r="1.6" fill="#8A5E13" />
-      <circle cx="73" cy="85" r="1.6" fill="#8A5E13" />
-      <g transform="translate(24 76)">
-        <circle r="11" fill="#F4EAD5" stroke="#A9855A" strokeWidth="2.4" />
-        <circle cx="-3.5" cy="-3.5" r="1.8" fill="#8a6b46" />
-        <circle cx="3.5" cy="-3.5" r="1.8" fill="#8a6b46" />
-        <circle cx="-3.5" cy="3.5" r="1.8" fill="#8a6b46" />
-        <circle cx="3.5" cy="3.5" r="1.8" fill="#8a6b46" />
-      </g>
+    <svg width={size} height={size} viewBox="-0.26 -0.26 6.52 6.52" aria-hidden>
+      {/* фон-лён + рама */}
+      <rect x="-0.26" y="-0.26" width="6.52" height="6.52" rx="0.72" fill="#F3E9D2" />
+      <rect x="-0.14" y="-0.14" width="6.28" height="6.28" rx="0.6" fill="none" stroke="#8B5E3C" strokeWidth="0.17" />
+      <rect
+        x="-0.03"
+        y="-0.03"
+        width="6.06"
+        height="6.06"
+        rx="0.3"
+        fill="none"
+        stroke="#8B5E3C"
+        strokeWidth="0.07"
+        strokeDasharray="0.3 0.2"
+        opacity="0.6"
+      />
+      {LOGO_PACK.map((p, i) => {
+        const o = orientationsFor(p.id)[p.o];
+        const tr = `translate(${o.w / 2} ${o.h / 2}) scale(${sc}) translate(${-o.w / 2} ${-o.h / 2})`;
+        const btnCell = i === LOGO_BUTTON_INDEX ? orientationCells(p.id, p.o)[1] : null;
+        return (
+          <g key={i} transform={`translate(${p.c} ${p.r})`}>
+            <g transform={tr}>
+              <PatchGlyph patchId={p.id} orientation={p.o} cell={1} income={false} />
+            </g>
+            {btnCell && (
+              <g transform={`translate(${btnCell[1] + 0.5} ${btnCell[0] + 0.5}) scale(0.62)`}>
+                <circle r={0.46} cy={0.06} fill="#2E1D0E" opacity="0.25" />
+                <circle r={0.42} fill="#F8F0DD" stroke="#5B3B20" strokeWidth={0.1} />
+                <circle r={0.29} fill="none" stroke="#C9B583" strokeWidth={0.055} />
+                <circle r={0.095} cx={-0.125} cy={-0.125} fill="#5B3B20" />
+                <circle r={0.095} cx={0.125} cy={-0.125} fill="#5B3B20" />
+                <circle r={0.095} cx={-0.125} cy={0.125} fill="#5B3B20" />
+                <circle r={0.095} cx={0.125} cy={0.125} fill="#5B3B20" />
+              </g>
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -119,7 +162,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
   const resumeGame = store.currentGame ?? null;
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-10">
+    <div className="mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-10 md:max-w-[880px] md:px-8">
       {/* Логотип */}
       <div className="pop-in relative">
         <LogoMark size={104} />
@@ -159,76 +202,78 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
         </button>
       )}
 
-      {/* Основные кнопки */}
-      <Button
-        size="lg"
-        className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold"
-        onClick={() => {
-          sound.ensure();
-          sound.tap();
-          setPickOpen(true);
-        }}
-      >
-        <Play className="mr-2 h-5 w-5" />
-        {t('home_play')}
-      </Button>
+      {/* Основные кнопки: на планшете — три в ряд */}
+      <div className="w-full space-y-3 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
+        <Button
+          size="lg"
+          className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold md:h-auto md:min-h-[78px] md:text-[18px]"
+          onClick={() => {
+            sound.ensure();
+            sound.tap();
+            setPickOpen(true);
+          }}
+        >
+          <Play className="mr-2 h-5 w-5" />
+          {t('home_play')}
+        </Button>
 
-      {/* С другом — онлайн по коду или через открытую комнату */}
-      <button
-        type="button"
-        onClick={onOnline}
-        className="mt-3 flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
-      >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
-          <Users className="h-6 w-6 text-[#3D5A77]" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[16px] font-extrabold text-foreground">{t('mp_title')}</div>
-          <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => {
-          sound.ensure();
-          sound.tap();
-          if (daily) {
-            toast({
-              title: t('home_daily_done_t'),
-              description: t('home_daily_done_d', {
-                res: daily.won ? t('win') : t('loss'),
-                score: `${daily.score > 0 ? '+' : ''}${daily.score}`,
-              }),
-            });
-            return;
-          }
-          onDaily();
-        }}
-        className={`mt-3 flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
-          daily
-            ? 'border-border bg-muted/60 opacity-80'
-            : 'border-[#D9A13F]/60 bg-[#D9A13F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(120,80,20,.45)]'
-        }`}
-      >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
-          <CalendarDays className="h-6 w-6 text-[#A6721F]" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[16px] font-extrabold text-foreground">
-            {t('home_daily', { n: dailyNumber(new Date()) })}
-            <Sparkles className="h-3.5 w-3.5 text-[#A6721F]" />
+        {/* С другом — онлайн по коду или через открытую комнату */}
+        <button
+          type="button"
+          onClick={onOnline}
+          className="flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
+            <Users className="h-6 w-6 text-[#3D5A77]" />
           </div>
-          <div className="text-[12.5px] font-semibold text-muted-foreground">
-            {daily
-              ? t('home_daily_played', {
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-extrabold text-foreground">{t('mp_title')}</div>
+            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            sound.ensure();
+            sound.tap();
+            if (daily) {
+              toast({
+                title: t('home_daily_done_t'),
+                description: t('home_daily_done_d', {
                   res: daily.won ? t('win') : t('loss'),
                   score: `${daily.score > 0 ? '+' : ''}${daily.score}`,
-                })
-              : t('home_daily_desc', { name: personaName(lang, 'fedor') })}
+                }),
+              });
+              return;
+            }
+            onDaily();
+          }}
+          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+            daily
+              ? 'border-border bg-muted/60 opacity-80'
+              : 'border-[#D9A13F]/60 bg-[#D9A13F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(120,80,20,.45)]'
+          }`}
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
+            <CalendarDays className="h-6 w-6 text-[#A6721F]" />
           </div>
-        </div>
-      </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-[16px] font-extrabold text-foreground">
+              {t('home_daily', { n: dailyNumber(new Date()) })}
+              <Sparkles className="h-3.5 w-3.5 text-[#A6721F]" />
+            </div>
+            <div className="text-[12.5px] font-semibold text-muted-foreground">
+              {daily
+                ? t('home_daily_played', {
+                    res: daily.won ? t('win') : t('loss'),
+                    score: `${daily.score > 0 ? '+' : ''}${daily.score}`,
+                  })
+                : t('home_daily_desc', { name: personaName(lang, 'fedor') })}
+            </div>
+          </div>
+        </button>
+      </div>
 
       {/* Нижний ряд */}
       <div className="mt-4 grid w-full grid-cols-3 gap-2.5">
@@ -356,17 +401,19 @@ function StatsDialog({
   store: StatsStore;
 }) {
   const lang = useLang();
+  const [achOpen, setAchOpen] = useState<string | null>(null);
   const s = store.stats;
   const winrate = s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0;
   const avgCov = s.games > 0 ? Math.round(s.totalCoverage / s.games) : 0;
   const dailyKeys = Object.keys(store.daily).sort().reverse().slice(0, 14);
+  const locale = lang === 'en' ? 'en-US' : 'ru-RU';
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined} className="max-h-[88svh] w-[min(94vw,520px)] overflow-y-auto nice-scroll">
         <DialogHeader>
           <DialogTitle className="font-display text-[22px]">{t('stats_title')}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2">
           <BigStat value={s.games} label={t('stats_games')} />
           <BigStat value={`${winrate}%`} label={t('stats_wr')} />
           <BigStat value={s.bestScore > -1000 ? s.bestScore : '—'} label={t('stats_best')} />
@@ -378,25 +425,30 @@ function StatsDialog({
         </div>
         <div className="stitch-divider my-2" />
         <h3 className="font-display text-[18px]">{t('stats_ach')}</h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2">
           {ACHIEVEMENTS.map((a) => {
             const got = !!store.achievements[a.id];
             return (
-              <div
+              <button
                 key={a.id}
-                className={`flex items-center gap-2 rounded-xl border p-2 ${
-                  got ? 'border-[#D9A13F]/60 bg-[#D9A13F]/10' : 'border-border bg-muted/40 opacity-60'
+                type="button"
+                onClick={() => setAchOpen(a.id)}
+                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-transform active:scale-[0.98] ${
+                  got ? 'border-[#D9A13F]/60 bg-[#D9A13F]/10' : 'border-border bg-muted/40'
                 }`}
-                title={achDesc(lang, a.id)}
               >
-                <span className="text-[20px] grayscale-[--tw-grayscale]" style={{ filter: got ? undefined : 'grayscale(1)' }}>
+                <span className="text-[22px] leading-none" style={{ filter: got ? undefined : 'grayscale(1) opacity(0.55)' }}>
                   {a.icon}
                 </span>
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-extrabold">{achTitle(lang, a.id)}</div>
-                  <div className="truncate text-[11px] font-semibold text-muted-foreground">{achDesc(lang, a.id)}</div>
-                </div>
-              </div>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-extrabold text-foreground">
+                    {achTitle(lang, a.id)}
+                  </span>
+                  <span className="block text-[11px] font-semibold text-muted-foreground">
+                    {got ? '✓' : '🔒'}
+                  </span>
+                </span>
+              </button>
             );
           })}
         </div>
@@ -420,6 +472,46 @@ function StatsDialog({
             </div>
           </>
         )}
+        {/* полное описание достижения по тапу */}
+        <Dialog open={achOpen !== null} onOpenChange={(v) => { if (!v) setAchOpen(null); }}>
+          {achOpen !== null && (
+            <DialogContent aria-describedby={undefined} className="w-[min(88vw,380px)]">
+              <DialogHeader>
+                <DialogTitle className="font-display text-center text-[21px]">
+                  {achTitle(lang, achOpen)}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col items-center gap-3 px-2 pb-1">
+                <span
+                  className="text-[46px] leading-none"
+                  style={{
+                    filter: store.achievements[achOpen] ? undefined : 'grayscale(1) opacity(0.5)',
+                  }}
+                >
+                  {ACHIEVEMENTS.find((a) => a.id === achOpen)?.icon}
+                </span>
+                <p className="text-center text-[14px] font-semibold text-foreground">
+                  {achDesc(lang, achOpen)}
+                </p>
+                {store.achievements[achOpen] ? (
+                  <span className="rounded-full bg-[#D9A13F]/15 px-3 py-1.5 text-[12px] font-extrabold text-[#8A5E13]">
+                    {t('ach_unlocked_at', {
+                      d: new Date(store.achievements[achOpen]).toLocaleDateString(locale, {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      }),
+                    })}
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-muted px-3 py-1.5 text-[12px] font-extrabold text-muted-foreground">
+                    {t('ach_locked')}
+                  </span>
+                )}
+              </div>
+            </DialogContent>
+          )}
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

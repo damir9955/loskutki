@@ -105,7 +105,7 @@ export function mpCreate(input: { name: string; avatar: string; isPublic: boolea
   return post<{ code: string; playerId: string }>('/api/mp/create', input);
 }
 
-export function mpJoin(input: { code: string; name: string; avatar: string }) {
+export function mpJoin(input: { code: string; name: string; avatar: string; playerId?: string }) {
   return post<{ code: string; playerId: string }>('/api/mp/join', input);
 }
 
@@ -119,6 +119,16 @@ export function mpMove(input: { code: string; playerId: string; action: NetActio
 
 export function mpControl(input: { code: string; playerId: string; op: 'leave' | 'cancel' | 'rematch' }) {
   return post<{ started?: boolean }>('/api/mp/control', input);
+}
+
+/** Быстрый матч (автопоиск): пару с другим искателем или первой открытой комнатой */
+export function mpQuick(input: { playerId?: string; name: string; avatar: string }) {
+  return post<{ status: 'matched' | 'waiting'; code?: string; playerId: string }>('/api/mp/quick', input);
+}
+
+/** Отменить автопоиск */
+export function mpQuickCancel(playerId: string) {
+  return post<{ ok?: boolean }>('/api/mp/quick', { playerId, op: 'cancel' });
 }
 
 export async function mpListRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>> {
@@ -143,6 +153,7 @@ export function mpErrorKey(code: string): string {
     case 'badname': return 'mp_bad_name';
     case 'badpayload': return 'mp_illegal';
     case 'gone': return 'mp_gone';
+    case 'ownroom': return 'mp_own_room';
     default: return 'mp_net';
   }
 }

@@ -121,8 +121,22 @@ const DICT: Record<string, [string, string]> = {
   mp_back: ['Назад', 'Back'],
   mp_wins: ['Побед в комнате: {a} : {b}', 'Wins in this room: {a} : {b}'],
   mp_reconnecting: ['Проверяем комнату…', 'Checking the room…'],
+  mp_reconnect: ['Переподключаемся…', 'Reconnecting…'],
+  mp_own_room: ['Это ваша комната — вернитесь в неё и ждите соперника', 'This is your own room — return to it and wait for your opponent'],
+  mp_have_room: ['У вас уже есть комната — ждём в ней', 'You already have a room — waiting in it'],
+  mp_your_room: ['ваша', 'yours'],
+  mp_return: ['Вернуться', 'Return'],
   mp_you: ['Вы', 'You'],
   mp_rules_note: ['На ответ даётся до 3 минут — иначе ход шагает вперёд сам.', 'You get up to 3 minutes per move — otherwise it steps forward automatically.'],
+  mp_quick: ['Быстрая игра', 'Quick match'],
+  mp_quick_h: ['автопоиск: соперник из очереди или первая открытая комната', 'auto-search: an opponent from the queue or the first open room'],
+  mp_quick_title: ['Быстрая игра', 'Quick match'],
+  mp_quick_searching: ['Ищем соперника…', 'Looking for an opponent…'],
+  mp_quick_elapsed: ['Ищем {n} с…', 'Searching for {n}s…'],
+  mp_quick_note: ['Соединяем с тем, кто тоже ищет, — или с первой открытой комнатой', 'We pair you with another searcher — or the first open room'],
+  mp_quick_found: ['Соперник найден!', 'Opponent found!'],
+  mp_quick_cancel: ['Отменить поиск', 'Cancel search'],
+  mp_timer_paused: ['таймер на паузе — соперник не на связи', 'timer paused — the opponent is offline'],
 
   // — статистика —
   stats_title: ['Статистика', 'Statistics'],
@@ -136,6 +150,8 @@ const DICT: Record<string, [string, string]> = {
   stats_leather: ['макс. кожаных', 'max leather'],
   stats_ach: ['Достижения', 'Achievements'],
   stats_daily: ['Игры дня', 'Daily games'],
+  ach_locked: ['Ещё не открыто', 'Not unlocked yet'],
+  ach_unlocked_at: ['Открыто: {d}', 'Unlocked: {d}'],
 
   // — настройки —
   set_title: ['Настройки', 'Settings'],
@@ -181,12 +197,12 @@ const DICT: Record<string, [string, string]> = {
   g_landing_you: ['Вы на клетке соперника!', "You're on the rival's cell!"],
   g_landing_bot: ['{name} — на вашей клетке', '{name} is on your cell'],
   g_landing_you_d: [
-    'Булавка ложится сверху — и вы ходите ещё раз.',
-    'Your pin goes on top — and you move again.',
+    'Ваша пуговка ложится сверху — и вы ходите ещё раз.',
+    'Your button goes on top — and you move again.',
   ],
   g_landing_bot_d: [
-    'Булавка соперника сверху — его ход продолжается.',
-    "The rival's pin is on top — their turn continues.",
+    'Пуговка соперника сверху — его ход продолжается.',
+    "The rival's button is on top — their turn continues.",
   ],
   g_leather_t: ['Кожаный лоскуток!', 'Leather patch!'],
   g_leather_d: ['Пройдена спецклетка — поставьте его на полотно.', 'Special cell passed — place it on your quilt.'],
@@ -271,15 +287,15 @@ const DICT: Record<string, [string, string]> = {
   log_advance_foe: ['Соперник продвинулся вперёд за пуговицами.', 'The rival moved ahead for buttons.'],
   log_buy_you: ['Вы сшили «{name}» (−{cost} пуговиц, время +{time}).', 'You sewed "{name}" (−{cost} buttons, time +{time}).'],
   log_buy_foe: ['Соперник сшил «{name}» (−{cost} пуговиц, время +{time}).', 'The rival sewed "{name}" (−{cost} buttons, time +{time}).'],
-  log_landAdv_you: ['Вы догнали соперника точно на его булавке.', 'You caught up with the rival exactly on their pin.'],
-  log_landAdv_foe: ['Соперник догнал вас точно на вашей булавке.', 'The rival caught up with you exactly on your pin.'],
+  log_landAdv_you: ['Вы догнали соперника точно на его пуговке.', 'You caught up with the rival exactly on their button.'],
+  log_landAdv_foe: ['Соперник догнал вас точно на вашей пуговке.', 'The rival caught up with you exactly on your button.'],
   log_landBuy_you: [
-    'Вы встали точно на булавку соперника — ходите ещё раз.',
-    'You landed exactly on the rival’s pin — you go again.',
+    'Вы встали точно на пуговку соперника — ходите ещё раз.',
+    'You landed exactly on the rival’s button — you go again.',
   ],
   log_landBuy_foe: [
-    'Соперник встал точно на вашу булавку — и ходит ещё раз.',
-    'The rival landed exactly on your pin — and goes again.',
+    'Соперник встал точно на вашу пуговку — и ходит ещё раз.',
+    'The rival landed exactly on your button — and goes again.',
   ],
   log_tile_you: ['Вы получили спецплитку 7×7: +{n} очков!', 'You earned the 7×7 special tile: +{n} points!'],
   log_tile_foe: ['Соперник получил спецплитку 7×7: +{n} очков!', 'The rival earned the 7×7 special tile: +{n} points!'],
@@ -364,7 +380,7 @@ export function personaDifficulty(lang: Lang, level: BotLevel): string {
 export function personaQuips(lang: Lang, level: BotLevel): string[] {
   return lang === 'en' ? PERSONA_EN[level].quips : PERSONA_RU[level].quips;
 }
-/** Буква на булавке соперника (инициал имени). */
+/** Буква на пуговке соперника (инициал имени). */
 export function personaInitial(lang: Lang, level: BotLevel): string {
   const n = personaName(lang, level);
   const last = n.split(' ').pop() ?? n;

@@ -9,6 +9,7 @@ import {
   Check,
   FlipHorizontal,
   Lightbulb,
+  Pause,
   RotateCw,
   X,
 } from 'lucide-react';
@@ -70,6 +71,7 @@ import { loadStore, recordGame, saveStore, todayKey, type GameSummary } from '@/
 import { avatarUrl } from '@/lib/avatars';
 import type { NetAction } from '@/lib/game/types';
 import { useToast } from '@/hooks/use-toast';
+import { useIsTablet } from '@/hooks/use-is-tablet';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 
 function sleep(ms: number) {
@@ -96,6 +98,8 @@ export interface OnlineCtx {
   opponent: { name: string; avatar: string; connected: boolean; left: boolean };
   /** дедлайн хода по часам сервера (epoch ms) */
   turnDeadline: number | null;
+  /** таймер приостановлен: владелец хода не на связи (телефон в кармане) */
+  turnPaused: boolean;
   /** serverNow − Date.now() на момент последнего poll — поправка часов */
   clockOffset: number;
   submit: (action: NetAction) => Promise<
@@ -196,7 +200,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             await sleep(FAST ? 20 : 160);
           }
         } else if (e.type === 'landing') {
-          // посадка на клетку соперника: булавка сверху — ход продолжается без
+          // посадка на клетку соперника: пуговка сверху — ход продолжается без
           // бонусов (просто понятное объяснение, почему ход снова у этого игрока)
           vibrate(12, settings.current.vibration);
           toast({
@@ -637,11 +641,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     };
   }, [placing]);
 
-  return (
-    <div className="mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)] xl:max-w-[1200px] xl:flex-row xl:gap-6">
-      {/* ===== Игровая колонка ===== */}
-      <div className="flex min-h-0 w-full flex-col xl:w-[600px] xl:shrink-0">
-        {/* Шапка — компактная, чтобы полотно было больше */}
+  const tablet = useIsTablet();
+
+  // ===== блоки интерфейса (компонуются по-разному для телефона и планшета) =====
+  const headerNode = (
         <div className="flex items-center justify-between py-0.5">
           <button
             type="button"
@@ -670,7 +673,12 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
               )}
               <span className="truncate">{turnBanner || (state.mode === 'daily' ? t('daily_mode', { n: dailyNumber(new Date()) }) : state.mode === 'online' ? t('mp_mode') : t('duel_mode'))}</span>
               {isOnline && online?.turnDeadline != null && (
-                <TurnTimer deadline={online.turnDeadline} offset={online.clockOffset} mine={mySideNow} />
+                <TurnTimer
+                  deadline={online.turnDeadline}
+                  offset={online.clockOffset}
+                  mine={mySideNow}
+                  paused={online.turnPaused}
+                />
               )}
             </div>
           </div>
@@ -715,7 +723,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           </div>
         </div>
 
-        {/* Панель соперника — компактнее, чтобы полотно было больше */}
+  );
+
+  const opponentNode = (
         <div className="stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0">
           <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
             {foeAvatar ? (
@@ -780,7 +790,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           </Sheet>
         </div>
 
-        {/* Дорожка времени */}
+  );
+
+  const trackNode = (
         <div className="mt-1">
           <TimeTrack
             positions={[me.time, bot.time]}
@@ -793,7 +805,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           />
         </div>
 
-        {/* Мои статы — НАД полотном */}
+  );
+
+  const statsNode = (
         <div className="mt-1 flex items-center justify-center gap-1">
           <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} />
           <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} />
@@ -811,9 +825,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           )}
         </div>
 
-        {/* Полотно — квадрат, вписывается в свободное место (забирает место бывшего баннера) */}
-        <div className="mt-1 flex min-h-0 flex-1 items-center justify-center">
-          <div ref={boardHostRef} className="relative aspect-square max-h-full w-full max-w-[520px]">
+  );
+
+  const boardNode = (
+        <div className={tablet ? 'flex min-h-0 min-w-0 flex-1 items-center justify-center' : 'mt-1 flex min-h-0 flex-1 items-center justify-center'}>
+          <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full max-w-[640px]' : 'relative aspect-square max-h-full w-full max-w-[520px]'}>
             <QuiltBoard
               board={me.board}
               interactive={(placingNow || leatherHuman) && !busy && !dragActive}
@@ -928,17 +944,19 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           </div>
         </div>
 
-        {/* Рынок: тап или перетаскивание прямо на полотно (чуть левее и ниже — по свободному месту) */}
-        <div className="mt-2">
+  );
+
+  const marketNode = (
+        <div className={tablet ? 'w-full' : 'mt-2'}>
           <div
-            className={`-ml-1.5 flex gap-1.5 transition-opacity ${
+            className={`${tablet ? 'flex w-full flex-col gap-2' : '-ml-1.5 flex gap-1.5'} transition-opacity ${
               placingNow && !dragActive ? 'pointer-events-none opacity-40' : 'opacity-100'
             }`}
           >
             {checks.map(({ m, check }) => (
               <div
                 key={m.marketIndex}
-                className="min-w-0 flex-1"
+                className={tablet ? 'w-full' : 'min-w-0 flex-1'}
                 onPointerDown={(e) => cardPointerDown(e, m.marketIndex, m.patchId)}
               >
                 <MarketCard
@@ -968,7 +986,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           </div>
         </div>
 
-        {/* «Шагнуть вперёд»: слова → числа+часы в отдельной плашке · пуговицы */}
+  );
+
+  const advanceNode = (
         <button
           type="button"
           onClick={doAdvance}
@@ -1005,24 +1025,62 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             )}
           </span>
         </button>
-      </div>
+  );
 
-      {/* Хроника (десктоп) */}
-      <aside className="hidden w-[300px] flex-col gap-2 xl:flex">
-        <div className="stitched-card mt-1.5 max-h-[45vh] flex-1 overflow-y-auto p-3">
-          <div className="mb-1 text-[11px] font-extrabold tracking-wide text-muted-foreground uppercase">
-            {t('g_chronicle')}
-          </div>
-          {[...state.log].reverse().slice(0, 16).map((l, i) => (
-            <div
-              key={i}
-              className={`text-[12.5px] font-semibold ${l.player === 0 ? 'text-foreground' : 'text-muted-foreground'}`}
-            >
-              {logLine(lang, l)}
-            </div>
-          ))}
+  const chronicleNode = (
+    <div className="stitched-card min-h-[120px] flex-1 overflow-y-auto p-3">
+      <div className="mb-1 text-[11px] font-extrabold tracking-wide text-muted-foreground uppercase">
+        {t('g_chronicle')}
+      </div>
+      {[...state.log].reverse().slice(0, 16).map((l, i) => (
+        <div
+          key={i}
+          className={`text-[12.5px] font-semibold ${l.player === 0 ? 'text-foreground' : 'text-muted-foreground'}`}
+        >
+          {logLine(lang, l)}
         </div>
-      </aside>
+      ))}
+    </div>
+  );
+
+  return (
+    <div
+      className={
+        tablet
+          ? 'mx-auto flex h-svh w-full max-w-[1280px] select-none flex-row gap-3 overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),6px)]'
+          : 'mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)]'
+      }
+    >
+      {tablet ? (
+        <>
+          {/* планшет: сверху шапка, дорожка и статы; ниже — полотно слева,
+              а справа колонка соперника, рынка, шага вперёд и хроники */}
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            {headerNode}
+            {trackNode}
+            {statsNode}
+            <div className="flex min-h-0 flex-1 gap-3">
+              {boardNode}
+              <aside className="flex w-[312px] shrink-0 flex-col gap-2 overflow-y-auto nice-scroll pb-1 pr-0.5 xl:w-[360px]">
+                {opponentNode}
+                {marketNode}
+                {advanceNode}
+                {chronicleNode}
+              </aside>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex min-h-0 w-full flex-col">
+          {headerNode}
+          {opponentNode}
+          {trackNode}
+          {statsNode}
+          {boardNode}
+          {marketNode}
+          {advanceNode}
+        </div>
+      )}
 
       {/* Карточка лоскутка из ленты «дальше в пути» */}
       {ribbonDetail !== null && (
@@ -1066,6 +1124,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 }
 
+
 /** Компактная вертикальная плитка показателя соперницы */
 function EnemyTile({ icon, value, title }: { icon: React.ReactNode; value: React.ReactNode; title: string }) {
   return (
@@ -1079,13 +1138,34 @@ function EnemyTile({ icon, value, title }: { icon: React.ReactNode; value: React
   );
 }
 
-/** Таймер хода (онлайн): mm:ss; краснеет и пульсирует на последних 30 секундах */
-function TurnTimer({ deadline, offset, mine }: { deadline: number; offset: number; mine: boolean }) {
+/** Таймер хода (онлайн): mm:ss; краснеет и пульсирует на последних 30 секундах.
+ *  Приостановлен (владелец хода пропал) — иконка паузы вместо отсчёта. */
+function TurnTimer({
+  deadline,
+  offset,
+  mine,
+  paused,
+}: {
+  deadline: number;
+  offset: number;
+  mine: boolean;
+  paused: boolean;
+}) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((v) => v + 1), 500);
     return () => clearInterval(id);
   }, []);
+  if (paused) {
+    return (
+      <span
+        className="ml-0.5 flex shrink-0 items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] font-extrabold leading-none text-muted-foreground"
+        title={t('mp_timer_paused')}
+      >
+        <Pause className="h-2.5 w-2.5" strokeWidth={3.2} />
+      </span>
+    );
+  }
   const left = Math.max(0, deadline - (Date.now() + offset));
   const mm = Math.floor(left / 60000);
   const ss = Math.floor((left % 60000) / 1000);
