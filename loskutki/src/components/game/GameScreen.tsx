@@ -70,7 +70,7 @@ import { loadStore, recordGame, saveStore, todayKey, type GameSummary } from '@/
 import { avatarUrl } from '@/lib/avatars';
 import type { NetAction } from '@/lib/game/types';
 import { useToast } from '@/hooks/use-toast';
-import { useIsTablet } from '@/hooks/use-is-tablet';
+import { useIsBigPortrait, useIsTablet } from '@/hooks/use-is-tablet';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 
 function sleep(ms: number) {
@@ -101,6 +101,9 @@ export interface OnlineCtx {
   turnPaused: boolean;
   /** serverNow − Date.now() на момент последнего poll — поправка часов */
   clockOffset: number;
+  /** ход уже летит на сервер: кнопки блокируются, чтобы второй тап
+   * не получил отказ (гонка «двойной тап = ход не принят») */
+  busy: boolean;
   submit: (action: NetAction) => Promise<
     { ok: true; state: GameState; events: GameEvent[] } | { ok: false; error: string }
   >;
@@ -384,6 +387,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   const confirmPlacement = useCallback(async () => {
     if (!placing) return;
+    if (online?.busy) return; // ход уже в полёте — второй тап игнорируем молча
     if (!isLegalPlacement(me.board, placing.patchId, placing)) {
       sound.error();
       vibrate(70, settings.current.vibration);
@@ -399,9 +403,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         c: placing.c,
       });
       if (!res.ok) {
-        sound.error();
-        vibrate(70, settings.current.vibration);
-        toast({ title: t('mp_move_rejected') });
+        // 'busy' — не ошибка: наш же первый ход ещё обрабатывается.
+        // Прочие отказы клиент уже пробовал повторить сам (OnlineGameScreen);
+        // сюда доходит только реальная невозможность хода
+        if (res.error !== 'busy') {
+          sound.error();
+          vibrate(70, settings.current.vibration);
+          toast({ title: t('mp_move_rejected') });
+        }
         return;
       }
       setPlacing(null);
@@ -421,6 +430,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   const doAdvance = useCallback(async () => {
     if (!myTurn) return;
+    if (online?.busy) return; // ход уже в полёте
     sound.ensure();
     sound.advance();
     setPlacing(null);
@@ -429,8 +439,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     if (online) {
       const res = await online.submit({ type: 'advance' });
       if (!res.ok) {
-        sound.error();
-        toast({ title: t('mp_move_rejected') });
+        if (res.error !== 'busy') {
+          sound.error();
+          toast({ title: t('mp_move_rejected') });
+        }
         return;
       }
       await applyResult(res, true);
@@ -445,10 +457,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         sound.error();
         return;
       }
+      if (online?.busy) return;
       if (online) {
         const res = await online.submit({ type: 'leather', r, c });
         if (!res.ok) {
-          sound.error();
+          if (res.error !== 'busy') sound.error();
           return;
         }
         await applyResult(res, true);
@@ -641,6 +654,13 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   }, [placing]);
 
   const tablet = useIsTablet();
+  /** большой портретный экран (планшет вертикально): телефонная вёрстка,
+  * но колонка шире и все элементы крупнее — экран используется по-максимуму */
+  const bigPort = useIsBigPortrait();
+  /** любой «большой» экран — крупная лента «дальше в пути» и пр. */
+  const big = tablet || bigPort;
+  /** онлайн: ход в полёте — блокируем ввод, чтобы второй тап не дал отказ */
+  const onlineBusy = online?.busy ?? false;
 
   // ===== блоки интерфейса (компонуются по-разному для телефона и планшета) =====
   const headerNode = (
@@ -651,24 +671,26 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
               sound.tap();
               onExit();
             }}
-            className="btn-cloth flex h-8 w-8 items-center justify-center rounded-xl"
+            className={`btn-cloth flex items-center justify-center rounded-xl ${bigPort ? 'h-10 w-10' : 'h-8 w-8'}`}
             aria-label={t('g_exit')}
           >
-            <ArrowLeft className="h-[18px] w-[18px]" />
+            <ArrowLeft className={bigPort ? 'h-[22px] w-[22px]' : 'h-[18px] w-[18px]'} />
           </button>
           <div className="min-w-[130px] text-center leading-tight">
-            <div className="font-display text-[17px] text-foreground">{t('app_title')}</div>
+            <div className={`font-display text-foreground ${bigPort ? 'text-[20px]' : 'text-[17px]'}`}>{t('app_title')}</div>
             {/* индикатор хода — компакт, в подзаголовке (не занимает отдельную строку) */}
             <div
               key={turnBanner}
-              className={`banner-in flex items-center justify-center gap-1.5 text-[10.5px] font-extrabold tracking-wide ${
+              className={`banner-in flex items-center justify-center gap-1.5 font-extrabold tracking-wide ${
+                bigPort ? 'text-[12.5px]' : 'text-[10.5px]'
+              } ${
                 mySideNow ? 'text-primary' : 'text-muted-foreground'
               }`}
             >
               {mySideNow ? (
-                <HourglassIcon size={12} className="shrink-0" />
+                <HourglassIcon size={bigPort ? 14 : 12} className="shrink-0" />
               ) : (
-                <ClockIcon size={12} className="shrink-0 opacity-70" />
+                <ClockIcon size={bigPort ? 14 : 12} className="shrink-0 opacity-70" />
               )}
               <span className="truncate">{turnBanner || (state.mode === 'daily' ? t('daily_mode', { n: dailyNumber(new Date()) }) : state.mode === 'online' ? t('mp_mode') : t('duel_mode'))}</span>
               {isOnline && online?.turnDeadline != null && (
@@ -701,12 +723,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                 if (!myTurn) return;
                 setShowHint((v) => !v);
               }}
-              className={`btn-cloth flex h-8 w-8 items-center justify-center rounded-xl ${
+              className={`btn-cloth flex items-center justify-center rounded-xl ${
+                bigPort ? 'h-10 w-10' : 'h-8 w-8'
+              } ${
                 showHint ? 'bg-[#FFF7E0] ring-2 ring-[#D9A13F]' : ''
               }`}
               aria-label={t('g_hint')}
             >
-              <Lightbulb className="h-4 w-4" fill={showHint ? '#FFD98A' : 'none'} />
+              <Lightbulb className={bigPort ? 'h-5 w-5' : 'h-4 w-4'} fill={showHint ? '#FFD98A' : 'none'} />
             </button>
             <button
               type="button"
@@ -714,10 +738,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                 sound.tap();
                 onOpenRules();
               }}
-              className="btn-cloth flex h-8 w-8 items-center justify-center rounded-xl"
+              className={`btn-cloth flex items-center justify-center rounded-xl ${bigPort ? 'h-10 w-10' : 'h-8 w-8'}`}
               aria-label={t('g_rules')}
             >
-              <BookOpen className="h-4 w-4" />
+              <BookOpen className={bigPort ? 'h-5 w-5' : 'h-4 w-4'} />
             </button>
           </div>
         </div>
@@ -807,18 +831,19 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const statsNode = (
-        <div className={tablet ? 'grid shrink-0 grid-cols-2 gap-1' : 'mt-1 flex items-center justify-center gap-1'}>
-          <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} />
-          <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} />
-          <BigStat icon={<ClockIcon size={16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} />
+        <div className={tablet ? 'grid shrink-0 grid-cols-2 gap-1' : `mt-1 flex items-center justify-center ${bigPort ? 'gap-2' : 'gap-1'}`}>
+          <BigStat icon={<CoinIcon size={bigPort ? 21 : 17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} big={bigPort} />
+          <BigStat icon={<IncomeIcon size={bigPort ? 20 : 16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} big={bigPort} />
+          <BigStat icon={<ClockIcon size={bigPort ? 20 : 16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} big={bigPort} />
           <BigStat
-            icon={<BoardFillIcon size={16} covered={me.covered} />}
+            icon={<BoardFillIcon size={bigPort ? 20 : 16} covered={me.covered} />}
             value={me.covered}
             label={t('g_cells')}
             title={t('g_my_cells', { n: me.covered })}
+            big={bigPort}
           />
           {me.tile7x7 && (
-            <div className="pop-in flex h-[34px] w-8 items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px]" title={t('g_tile7x7')}>
+            <div className={`pop-in flex items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px] ${bigPort ? 'h-[42px] w-10 text-[18px]' : 'h-[34px] w-8'}`} title={t('g_tile7x7')}>
               🏅
             </div>
           )}
@@ -828,10 +853,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   const boardNode = (
         <div className={tablet ? 'flex min-h-0 min-w-0 flex-1 items-center justify-center' : 'mt-1 flex min-h-0 flex-1 items-center justify-center'}>
-          <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full' : 'relative aspect-square max-h-full w-full max-w-[520px]'}>
+          <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full' : `relative aspect-square max-h-full w-full ${bigPort ? 'max-w-none' : 'max-w-[520px]'}`}>
             <QuiltBoard
               board={me.board}
-              interactive={(placingNow || leatherHuman) && !busy && !dragActive}
+              interactive={(placingNow || leatherHuman) && !busy && !onlineBusy && !dragActive}
               placing={quiltPlacing}
               onPlace={(r, c) => {
                 if (leatherHuman) void placeLeatherHuman(r, c);
@@ -930,7 +955,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                   <button
                     type="button"
                     onClick={() => void confirmPlacement()}
-                    disabled={!ghostLegal}
+                    disabled={!ghostLegal || onlineBusy}
                     className="btn-wood flex h-11 items-center gap-1.5 rounded-full px-5 text-[15.5px] font-extrabold"
                     aria-label={t('g_sew_aria')}
                   >
@@ -948,7 +973,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const marketNode = (
         <div className={tablet ? 'flex min-h-0 w-full flex-1 flex-col' : 'mt-2'}>
           <div
-            className={`${tablet ? 'flex min-h-0 flex-1 flex-col gap-2' : '-ml-1.5 flex gap-1.5'} transition-opacity ${
+            className={`${tablet ? 'flex min-h-0 flex-1 flex-col gap-2' : `-ml-1.5 flex ${bigPort ? 'gap-2.5' : 'gap-1.5'}`} transition-opacity ${
               placingNow && !dragActive ? 'pointer-events-none opacity-40' : 'opacity-100'
             }`}
           >
@@ -963,12 +988,13 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                   buttons={me.buttons}
                   placeable={check.placeable}
                   tall={tablet}
+                  big={bigPort}
                   selected={
                     hint && hint.action === 'buy' && hint.marketIndex === m.marketIndex
                       ? true
                       : placing?.marketIndex === m.marketIndex
                   }
-                  disabled={!myTurn || busy}
+                  disabled={!myTurn || busy || onlineBusy}
                   onSelect={() => selectPatch(m.marketIndex)}
                 />
               </div>
@@ -978,6 +1004,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           <div className={tablet ? 'mt-1 shrink-0' : 'mt-1'}>
             <UpcomingRibbon
               upcoming={upcoming}
+              big={big}
               onSelect={(id) => {
                 sound.tap();
                 setRibbonDetail(id);
@@ -992,26 +1019,28 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         <button
           type="button"
           onClick={doAdvance}
-          disabled={!myTurn || busy}
-          className={`btn-wood mt-1 flex h-12 w-full items-center justify-between gap-2 rounded-xl px-3 ${
+          disabled={!myTurn || busy || onlineBusy}
+          className={`btn-wood mt-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 ${
+            bigPort ? 'h-14' : 'h-12'
+          } ${
             forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
           } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
           aria-label={t('g_advance_aria', { from: me.time, to: advanceTo, n: advPreview.buttonGain })}
         >
           <span className="flex min-w-0 items-center gap-1.5">
-            <ChevronsRight className="h-5 w-5 shrink-0" />
-            <span className="shrink-0 text-[14.5px] font-extrabold">{t('g_advance')}</span>
+            <ChevronsRight className={`shrink-0 ${bigPort ? 'h-6 w-6' : 'h-5 w-5'}`} />
+            <span className={`shrink-0 font-extrabold ${bigPort ? 'text-[16.5px]' : 'text-[14.5px]'}`}>{t('g_advance')}</span>
             {/* числа и значок времени — в заметной тёмной плашке, не сливаются с кнопкой */}
             <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#3F2A14]/35 px-2 py-1 shadow-[inset_0_1px_2px_rgba(0,0,0,.25)]">
-              <span className="tabular-nums text-[14px] leading-none font-extrabold">{me.time}</span>
-              <ArrowRight className="h-4.5 w-4.5 shrink-0" strokeWidth={3.4} />
-              <span className="tabular-nums text-[14px] leading-none font-extrabold">{advanceTo}</span>
-              <ClockIcon size={14} />
+              <span className={`tabular-nums leading-none font-extrabold ${bigPort ? 'text-[15.5px]' : 'text-[14px]'}`}>{me.time}</span>
+              <ArrowRight className={`shrink-0 ${bigPort ? 'h-5 w-5' : 'h-4.5 w-4.5'}`} strokeWidth={3.4} />
+              <span className={`tabular-nums leading-none font-extrabold ${bigPort ? 'text-[15.5px]' : 'text-[14px]'}`}>{advanceTo}</span>
+              <ClockIcon size={bigPort ? 16 : 14} />
             </span>
           </span>
-          <span className="flex shrink-0 items-center gap-1 text-[15px] font-extrabold">
+          <span className={`flex shrink-0 items-center gap-1 font-extrabold ${bigPort ? 'text-[16.5px]' : 'text-[15px]'}`}>
             <span className="tabular-nums">+{advPreview.buttonGain}</span>
-            <CoinIcon size={17} />
+            <CoinIcon size={bigPort ? 19 : 17} />
             {advPreview.leathers > 0 && (
               <span
                 className="ml-1 flex items-center gap-0.5 rounded-full bg-[#7A5230]/70 px-1.5 py-0.5"
@@ -1032,7 +1061,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       className={
         tablet
           ? 'mx-auto flex h-svh w-full max-w-[1600px] select-none flex-col overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),6px)]'
-          : 'mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)]'
+          : `mx-auto flex h-svh w-full select-none flex-col overflow-hidden ${
+              bigPort
+                ? 'max-w-[min(96vw,760px)] px-3 pb-[max(env(safe-area-inset-bottom),12px)] pt-[max(env(safe-area-inset-top),8px)]'
+                : 'max-w-[560px] px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)]'
+            }`
       }
     >
       {tablet ? (
@@ -1045,10 +1078,13 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             {statsNode}
             <div className="flex min-h-0 min-w-0 flex-1 items-center overflow-hidden">{opponentNode}</div>
           </div>
-          {/* главная зона: полотно занимает максимум места, справа — рынок и шаг вперёд */}
+          {/* главная зона: полотно занимает максимум места, справа — рынок и шаг вперёд.
+              Колонка рынка ТЕКУЧАЯ (26% ширины, 280–420px): на широких планшетах
+              карточки и лента крупнеют вместе с экраном, а не «висят» мелкими
+              при пустых полях по бокам */}
           <div className="mt-1 flex min-h-0 flex-1 gap-2">
             {boardNode}
-            <aside className="flex w-[312px] shrink-0 flex-col gap-2 overflow-hidden pb-0.5 xl:w-[352px]">
+            <aside className="flex w-[clamp(300px,30vw,440px)] shrink-0 flex-col gap-2 overflow-hidden pb-0.5">
               {marketNode}
               {advanceNode}
             </aside>

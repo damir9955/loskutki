@@ -173,7 +173,9 @@ export function BotAvatar({ level, size = 56, thinking = false }: { level: BotLe
 /** Карточка лоскутка на рынке: размер слева-сверху, фигурка по центру свободной зоны
  *  (выравнивание относительно её размера), справа столбик «цена → время → доход»,
  *  название по центру снизу. tall — планшетная колонка: карточка вытягивается
- *  по высоте родителя (flex-1) и фигурка становится крупной. */
+ *  по высоте родителя (flex-1) и фигурка становится крупной.
+ *  big — большой портретный экран (планшет вертикально): телефонный ряд
+ *  карточек, но зона фигурки выше, бирки и текст крупнее — экран заполнен. */
 export function MarketCard({
   patchId,
   buttons,
@@ -182,6 +184,7 @@ export function MarketCard({
   disabled,
   onSelect,
   tall = false,
+  big = false,
 }: {
   patchId: number;
   buttons: number;
@@ -190,6 +193,7 @@ export function MarketCard({
   disabled?: boolean;
   onSelect?: () => void;
   tall?: boolean;
+  big?: boolean;
 }) {
   const lang = useLang();
   const patch = PATCHES[patchId];
@@ -222,7 +226,9 @@ export function MarketCard({
     >
       {/* размер фигурки — слева сверху, компактная плашка (не перекрывает фигурку) */}
       <span
-        className="absolute top-0.5 left-0.5 rounded-md bg-[#7A5230]/14 px-[3px] py-[1px] text-[9px] leading-none font-extrabold text-[#7A5230]"
+        className={`absolute top-0.5 left-0.5 rounded-md bg-[#7A5230]/14 px-[3px] py-[1px] leading-none font-extrabold text-[#7A5230] ${
+          big ? 'text-[11px]' : 'text-[9px]'
+        }`}
         title={t('m_size', { w: maxC, h: maxR })}
       >
         {maxC}×{maxR}
@@ -231,9 +237,14 @@ export function MarketCard({
           зону, маленькие — заметно меньше (вписывается и по ширине, и по высоте —
           meet, viewBox раздут ровно настолько, какую долю занимает фигурка);
           сверху отступ под плашку размера, бирки — обычный поток справа.
-          В tall-режиме зона гибкая (flex-1) — фигурка крупная */}
-      <div className={`flex w-full items-center ${tall ? 'min-h-0 flex-1' : 'h-[58px]'} ${tall ? 'mt-1' : ''}`}>
-        <div className={`h-full min-w-0 flex-1 ${tall ? '' : 'pt-[12px]'}`}>
+          В tall-режиме зона гибкая (flex-1) — фигурка крупная,
+          в big-режиме зона выше фиксированной */}
+      <div
+        className={`flex w-full items-center ${
+          tall ? 'min-h-0 flex-1' : big ? 'h-[96px]' : 'h-[58px]'
+        } ${tall ? 'mt-1' : ''}`}
+      >
+        <div className={`h-full min-w-0 flex-1 ${tall ? '' : big ? 'pt-[16px]' : 'pt-[12px]'}`}>
           <svg
             viewBox={scaledGlyphViewBox(maxC, maxR, vbPad, patch.cells.length)}
             className="h-full w-full"
@@ -244,17 +255,19 @@ export function MarketCard({
           </svg>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-[2.5px] self-center">
-          <CardPill icon={<CoinIcon size={tall ? 12 : 10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} />
-          <CardPill icon={<ClockIcon size={tall ? 12 : 10} />} value={patch.time} title={t('m_time', { n: patch.time })} />
+          <CardPill icon={<CoinIcon size={tall ? 12 : big ? 13 : 10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} big={big} />
+          <CardPill icon={<ClockIcon size={tall ? 12 : big ? 13 : 10} />} value={patch.time} title={t('m_time', { n: patch.time })} big={big} />
           {/* доход — ПОД временем: зелёный если есть, красный с нулём если нет;
               иконка — ПЛЮСИК, тот же значок дохода, что над полотном */}
           <span
-            className={`flex items-center gap-0.5 rounded-full border-[1.5px] px-1 py-[1.5px] text-[10px] leading-none font-extrabold text-white shadow-md ${
+            className={`flex items-center gap-0.5 rounded-full border-[1.5px] px-1 py-[1.5px] leading-none font-extrabold text-white shadow-md ${
+              big ? 'text-[12px]' : 'text-[10px]'
+            } ${
               patch.income > 0 ? 'border-[#1E6B36] bg-[#2F8F4E]' : 'border-[#7E2D1C] bg-[#B3432B]'
             }`}
             title={patch.income > 0 ? t('m_inc_yes', { n: patch.income }) : t('m_inc_no')}
           >
-            <IncomeIcon size={tall ? 12 : 10} />
+            <IncomeIcon size={tall ? 12 : big ? 13 : 10} />
             {patch.income > 0 ? `+${patch.income}` : '0'}
           </span>
         </div>
@@ -263,14 +276,18 @@ export function MarketCard({
       <div className="flex w-full items-center">
         {blockedText ? (
           <span
-            className="w-full truncate rounded-full bg-destructive/90 px-1 py-[1.5px] text-left text-[9px] leading-none font-bold text-white"
+            className={`w-full truncate rounded-full bg-destructive/90 px-1 py-[1.5px] text-left leading-none font-bold text-white ${
+              big ? 'text-[11px]' : 'text-[9px]'
+            }`}
             title={blockedText}
           >
             {blockedText}
           </span>
         ) : (
           <span
-            className={`w-full truncate ${tall ? 'text-[11px]' : 'text-[10px]'} leading-none font-bold text-foreground/90 ${
+            className={`w-full truncate leading-none font-bold text-foreground/90 ${
+              tall ? 'text-[11px]' : big ? 'text-[12.5px]' : 'text-[10px]'
+            } ${
               name.length > 12 ? 'text-left' : 'text-center'
             }`}
           >
@@ -288,16 +305,20 @@ function CardPill({
   value,
   bad = false,
   title,
+  big = false,
 }: {
   icon: React.ReactNode;
   value: number;
   bad?: boolean;
   title: string;
+  big?: boolean;
 }) {
   return (
     <span
       title={title}
-      className={`flex items-center gap-0.5 rounded-full border-[1.5px] bg-card px-1 py-[1.5px] text-[10px] leading-none font-extrabold shadow-sm ${
+      className={`flex items-center gap-0.5 rounded-full border-[1.5px] bg-card px-1 py-[1.5px] leading-none font-extrabold shadow-sm ${
+        big ? 'text-[12px]' : 'text-[10px]'
+      } ${
         bad ? 'border-destructive/60 text-destructive' : 'border-[#A9855A]/60 text-foreground'
       }`}
     >
@@ -366,24 +387,26 @@ export function BigStat({
   label,
   accent = false,
   title,
+  big = false,
 }: {
   icon: React.ReactNode;
   value: React.ReactNode;
   label?: string;
   accent?: boolean;
   title?: string;
+  big?: boolean;
 }) {
   return (
     <div
-      className={`flex items-center gap-1 rounded-xl border-2 px-1.5 py-0.5 ${
+      className={`flex items-center gap-1 rounded-xl border-2 ${big ? 'px-2.5 py-1' : 'px-1.5 py-0.5'} ${
         accent ? 'border-primary/50 bg-primary/10' : 'border-border bg-card/85'
       }`}
       title={title ?? label}
     >
       <span className="flex shrink-0 items-center justify-center">{icon}</span>
       <div className="leading-none">
-        <div className="text-[15.5px] font-extrabold text-foreground">{value}</div>
-        {label && <div className="mt-0.5 text-[8.5px] font-bold tracking-wide text-muted-foreground uppercase">{label}</div>}
+        <div className={`font-extrabold text-foreground ${big ? 'text-[19px]' : 'text-[15.5px]'}`}>{value}</div>
+        {label && <div className={`mt-0.5 font-bold tracking-wide text-muted-foreground uppercase ${big ? 'text-[10px]' : 'text-[8.5px]'}`}>{label}</div>}
       </div>
     </div>
   );
@@ -397,24 +420,28 @@ export function GlyphDirect({ patchId, orientation = 0 }: { patchId: number; ori
   return <PatchGlyph patchId={patchId} orientation={orientation} cell={1} />;
 }
 
-/** Лента «дальше в пути»: все лоскутки круга после трёх доступных (горизонтальный скролл, тап — детали) */
+/** Лента «дальше в пути»: все лоскутки круга после трёх доступных (горизонтальный скролл, тап — детали).
+ *  big — большие экраны: чипы заметно крупнее (на планшетах мелкие иконки
+ *  «теряются» в пустоте). */
 export function UpcomingRibbon({
   upcoming,
   onSelect,
+  big = false,
 }: {
   upcoming: number[];
   onSelect?: (patchId: number) => void;
+  big?: boolean;
 }) {
   const lang = useLang();
   if (upcoming.length === 0) return null;
   return (
     <div className="rounded-xl border-2 border-border bg-card/60 p-1">
       <div className="flex items-baseline justify-between px-1.5 pb-1">
-        <span className="text-[9.5px] font-extrabold tracking-wider text-muted-foreground uppercase">{t('g_ribbon')}</span>
-        <span className="text-[9px] font-bold text-muted-foreground/80">{t('g_ribbon_n', { n: upcoming.length })}</span>
+        <span className={`font-extrabold tracking-wider text-muted-foreground uppercase ${big ? 'text-[11.5px]' : 'text-[9.5px]'}`}>{t('g_ribbon')}</span>
+        <span className={`font-bold text-muted-foreground/80 ${big ? 'text-[11px]' : 'text-[9px]'}`}>{t('g_ribbon_n', { n: upcoming.length })}</span>
       </div>
       <div className="hide-scrollbar overscroll-contain overflow-x-auto">
-        <div className="flex w-max items-center gap-1.5 px-0.5 py-1">
+        <div className={`flex w-max items-center px-0.5 py-1 ${big ? 'gap-2' : 'gap-1.5'}`}>
           {upcoming.map((id, i) => {
             const p = PATCHES[id];
             const maxR = p ? Math.max(...p.cells.map((c) => c[0])) + 1 : 1;
@@ -431,7 +458,9 @@ export function UpcomingRibbon({
                   cost: p?.cost ?? 0,
                   time: p?.time ?? 0,
                 })}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-2 border-border bg-card/80 p-1 transition-transform active:scale-95"
+                className={`flex shrink-0 items-center justify-center rounded-lg border-2 border-border bg-card/80 p-1 transition-transform active:scale-95 ${
+                  big ? 'h-14 w-14' : 'h-11 w-11'
+                }`}
               >
                 <svg
                   viewBox={scaledGlyphViewBox(maxC, maxR, 0.06, p ? p.cells.length : 1)}

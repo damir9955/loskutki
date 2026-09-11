@@ -39,8 +39,11 @@
   "exclude": [
     "node_modules",
     "deno",
+    "examples",
     "scripts/run-server-bun.ts",
     "scripts/test-deno-parity.ts",
-    "scripts/ws-e2e.ts"
+    "scripts/ws-e2e.ts",
+    "scripts/kv-restart-test.ts",
+    "scripts/kv-two-isolates-test.ts"
   ]
 }

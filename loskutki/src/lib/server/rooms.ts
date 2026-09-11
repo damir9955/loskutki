@@ -50,6 +50,14 @@ export function turnMs(): number {
 }
 
 const CONNECTED_MS = 12_000; // «на связи» = опрашивал меньше 12с назад
+
+/** Грайс для хода «в полёте»: сколько секунд после истечения дедлайна
+ *  ещё ждём настоящий ход подключённого владельца, прежде чем автопассить.
+ *  Масштабируется от длины хода (короткие тестовые ходы — грайс крошечный). */
+const IN_FLIGHT_GRACE_CAP_MS = 4_000;
+function inFlightGraceMs(): number {
+  return Math.min(IN_FLIGHT_GRACE_CAP_MS, Math.max(0, Math.round(turnMs() * 0.02)));
+}
 const ROOM_TTL_MS = 30 * 60_000; // брошенные партии чистим через 30 минут
 const WAITING_HOST_TTL_MS = 5 * 60_000; // ждущая комната без хоста живёт 5 минут
 const LIST_ALIVE_MS = 20_000; // в поиске показываем только живые комнаты
@@ -340,7 +348,11 @@ function commit(room: MpRoom, state: GameState, events: GameEvent[]): void {
 /** Просроченные ходы играют сами (advance; кожаный — в первую пустую клетку).
  *  НО: если владелец хода пропал (не опрашивает комнату) — таймер
  *  приостанавливается до OWNER_ABSENT_CAP_MS: телефон в кармане не должен
- *  проигрывать партию за игрока. Дольше 90с отсутствия — автопасс как раньше. */
+ *  проигрывать партию за игрока. Дольше 90с отсутствия — автопасс как раньше.
+ *  ПЛЮС ГРАЙС ДЛЯ ХОДА «В ПОЛЁТЕ»: дедлайн только-только истёк, а владелец
+ *  на связи — пару секунд ждём его настоящий ход (он уже летит), а не играем
+ *  просрочку в спину. Убирает гонку «тап в 2:59.9 → автопасс в 3:00.0 →
+ *  ход отклонён», когда повторный тот же ход проходил. */
 export function tick(room: MpRoom): void {
   if (room.status !== 'playing' || !room.state) return;
   let guard = 0;
@@ -351,6 +363,10 @@ export function tick(room: MpRoom): void {
     const ownerPlayer = owner === 0 ? room.host : room.guest;
     const absent = ownerPlayer ? Date.now() - ownerPlayer.lastPoll : Infinity;
     const explicitLeft = ownerPlayer ? ownerPlayer.leftAt !== null : true;
+    // грайс: просрочка «свежая», владелец опрашивает — ждём его ход ещё миг
+    if (!explicitLeft && absent <= CONNECTED_MS && Date.now() - (room.turnDeadline ?? 0) < inFlightGraceMs()) {
+      break;
+    }
     // владелец на связи (только что опрашивал) или отсутствует дольше лимита,
     // или ушёл сознательно — просрочка честная: автопасс
     if (!explicitLeft && absent > CONNECTED_MS && absent < OWNER_ABSENT_CAP_MS) {
@@ -387,6 +403,10 @@ export function tick(room: MpRoom): void {
 
 /** применить ход (валидация на движке) — синхронная часть */
 export function applyAction(room: MpRoom, seat: 0 | 1, action: NetAction): void {
+  // присутствие ДО тика: приславший ход явно «здесь» — сначала отмечаем
+  // (и снимаем заморозку, если она была для него), потом играем просрочки;
+  // иначе тик автопасснул бы ход в лицо активному игроку → «notyourturn»
+  touch(room, seat);
   tick(room);
   const st = room.state;
   if (!st || room.status === 'abandoned') throw 'gone';

@@ -839,6 +839,27 @@ interface MpRoom {
 const rooms = new Map<string, MpRoom>();
 
 const CONNECTED_MS = 12_000; // «на связи» = был активен меньше 12с назад
+
+/** Грайс для хода «в полёте»: сколько секунд после истечения дедлайна мы
+ *  ещё ждём настоящий ход подключённого владельца, прежде чем автопассить.
+ *  Масштабируется от длины хода (короткие тестовые ходы — грайс крошечный),
+ *  максимум 4с — незаметно для соперника, но достаточно, чтобы ход,
+ *  отправленный в последнюю секунду, долетел и применился. */
+const IN_FLIGHT_GRACE_CAP_MS = 4_000;
+function inFlightGraceMs(): number {
+  return Math.min(IN_FLIGHT_GRACE_CAP_MS, Math.max(0, Math.round(turnMs() * 0.02)));
+}
+
+/** Есть ли у игрока живой прикреплённый сокет в ЭТОМ изоляте (WS-режим:
+ *  присутствие видно по сокету, даже если игрок давно не слал запросов). */
+function ownerSocketAlive(room: MpRoom, owner: number): boolean {
+  const pid = owner === 0 ? room.host?.id : room.guest?.id;
+  if (!pid) return false;
+  for (const s of sockets.values()) {
+    if (s.alive && s.code === room.code && s.playerId === pid) return true;
+  }
+  return false;
+}
 const ROOM_TTL_MS = 30 * 60_000; // брошенные партии чистим через 30 минут
 const WAITING_HOST_TTL_MS = 5 * 60_000; // ждущая комната без хоста живёт 5 минут
 const LIST_ALIVE_MS = 20_000; // в поиске показываем только живые комнаты
@@ -1288,7 +1309,12 @@ function commit(room: MpRoom, state: GameState, events: GameEvent[]): void {
 /** Просроченные ходы играют сами (advance; кожаный — в первую пустую клетку).
  *  НО: если владелец хода пропал — таймер приостанавливается до
  *  OWNER_ABSENT_CAP_MS: телефон в кармане не должен проигрывать партию
- *  за игрока. Дольше 90с отсутствия — автопасс как раньше. */
+ *  за игрока. Дольше 90с отсутствия — автопасс как раньше.
+ *  ПЛЮС ГРАЙС ДЛЯ ХОДА «В ПОЛЁТЕ»: если дедлайн только-только истёк, а
+ *  владелец на связи (пусть и не опрашивает — сокет жив), мы пару секунд
+ *  ждём его настоящий ход, а не играем просрочку ему в спину. Это убирает
+ *  гонку «тапнул в 2:59.9 → сервер тикнул автопасс в 3:00.0 → ход отклонён»:
+ *  ход, отправленный до истечения, успевает примениться. */
 export function tick(room: MpRoom): void {
   if (room.status !== 'playing' || !room.state) return;
   let guard = 0;
@@ -1299,6 +1325,16 @@ export function tick(room: MpRoom): void {
     const ownerPlayer = owner === 0 ? room.host : room.guest;
     const absent = ownerPlayer ? Date.now() - ownerPlayer.lastPoll : Infinity;
     const explicitLeft = ownerPlayer ? ownerPlayer.leftAt !== null : true;
+    if (!explicitLeft) {
+      // грайс: дедлайн истёк только что, а владелец здесь (опросом или живым
+      // сокетом) — его ход, вероятно, уже летит к нам. Секунды не решают игру,
+      // а гонку с автопассом решают. Дедлайн ОСТАЁТСЯ просроченным — следующий
+      // тик (через ~1с) перепроверит; после грайса автопасс как обычно.
+      const expiredBy = Date.now() - (room.turnDeadline ?? 0);
+      const grace = inFlightGraceMs();
+      const live = absent <= CONNECTED_MS || ownerSocketAlive(room, owner);
+      if (live && expiredBy < grace) break;
+    }
     if (!explicitLeft && absent > CONNECTED_MS && absent < OWNER_ABSENT_CAP_MS) {
       // пропал совсем недавно — замораживаем таймер и ждём его
       room.frozen = true;
@@ -1333,6 +1369,12 @@ export function tick(room: MpRoom): void {
 
 /** применить ход (валидация на движке) */
 export function applyAction(room: MpRoom, seat: 0 | 1, action: NetAction): void {
+  // ПРИСУТСТВИЕ ДО ТИКА: игрок, приславший ход, явно «здесь». Сначала
+  // отмечаем его (и снимаем заморозку, если она была для него), и только
+  // потом играем просрочки — иначе тик мог автопасснуть ход в лицо только
+  // что вернувшемуся/активному игроку, и его ход получил бы «notyourturn»
+  // (та самая гонка «ход не принят — попробуйте ещё раз»).
+  touch(room, seat);
   tick(room);
   const st = room.state;
   if (!st || room.status === 'abandoned') throw 'gone';
@@ -2111,10 +2153,22 @@ async function sweepTick(): Promise<void> {
     // режим памяти: прежнее поведение — тик всех комнат каждую секунду
     for (const room of [...rooms.values()]) {
       const before = `${room.version}:${room.frozen}:${room.turnDeadline}`;
+      // присутствие подключённых (живой сокет = игрок здесь, даже если
+      // давно не слал state-запросов) — как в KV-проходе ниже: иначе в WS-режиме
+      // «на связи» гасло через 12с и rival видел ложное «не на связи»,
+      // а заморозка/автопасс решались по протухшему lastPoll
+      let presence = false;
+      for (const p of [room.host, room.guest]) {
+        if (!p || p.leftAt !== null) continue;
+        if (ownerSocketAlive(room, seatOf(room, p.id) ?? -1) && Date.now() - p.lastPoll > PRESENCE_SAVE_MS) {
+          p.lastPoll = Date.now();
+          presence = true;
+        }
+      }
       revive(room);
       tick(room);
       const after = `${room.version}:${room.frozen}:${room.turnDeadline}`;
-      if (before !== after) broadcastRoom(room);
+      if (before !== after || presence) broadcastRoom(room);
     }
     const removed = sweepStaleRooms();
     if (removed.length > 0 || now - lastRoomsPush >= ROOMS_PUSH_MS) void pushRoomsA();
@@ -2199,6 +2253,26 @@ async function sweepRoomsKv(): Promise<void> {
     } catch { /* ignore */ }
   }
   kvStats = { waiting, playing };
+}
+
+/** ТЕСТ-ХУК (в рантайме не используется; см. scripts/test-grace.ts):
+ *  выставить дедлайн хода комнаты напрямую — гонять гонку «ход в полёте»
+ *  без ожидания настоящих 3 минут. */
+export function setTestTurnDeadline(code: string, ts: number): boolean {
+  const room = rooms.get(code);
+  if (!room) return false;
+  room.turnDeadline = ts;
+  return true;
+}
+
+/** ТЕСТ-ХУК: «протухить» присутствие игрока — как будто он давно не опрашивал. */
+export function setTestLastPoll(code: string, playerId: string, ts: number): boolean {
+  const room = rooms.get(code);
+  if (!room) return false;
+  if (room.host.id === playerId) room.host.lastPoll = ts;
+  else if (room.guest?.id === playerId) room.guest!.lastPoll = ts;
+  else return false;
+  return true;
 }
 
 /** статистика для health-страницы */

@@ -26,6 +26,9 @@ import { GameScreen, type OnlineCtx } from './GameScreen';
 import type { GameEvent, GameState, MpRoomView, NetAction } from '@/lib/game/types';
 import type { MpSession } from '@/lib/net';
 import { mpControl, mpErrorKey, mpMove, mpOnNet, mpOnView, mpState, mpWsEnabled, mpWsReconnect } from '@/lib/net';
+import { availablePatches, checkBuy } from '@/lib/game/engine';
+import { isLegalPlacement } from '@/lib/game/placement';
+import { BOARD_SIZE } from '@/lib/game/constants';
 import { t } from '@/lib/i18n';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
@@ -40,6 +43,37 @@ const NOTFOUND_RETRIES = 3;
 /** WS-режим: окно переподключения — потом предлагаем выйти в лобби
  *  (сессия сохраняется — из хаба можно вернуться в партию) */
 const NET_FAIL_MS = 15_000;
+
+/** Стоит ли автоматически повторить отклонённый ход: по свежему виду сервера
+ *  ход всё ещё валиден (мой ход, фаза и место совпали). Вид повёрнут ко мне
+ *  (я — игрок 0), поэтому проверки движка работают напрямую. */
+function moveStillPossible(view: MpRoomView, action: NetAction): boolean {
+  const st = view.state;
+  if (!st || view.status !== 'playing' || st.phase === 'gameover') return false;
+  if (st.activePlayer !== 0) return false; // не мой ход — повтор бессмысленен
+  switch (action.type) {
+    case 'advance':
+      return st.phase === 'action';
+    case 'buy': {
+      if (st.phase !== 'action' || action.marketIndex === undefined) return false;
+      if (!checkBuy(st, action.marketIndex).allowed) return false;
+      const item = availablePatches(st).find((a) => a.marketIndex === action.marketIndex);
+      if (!item) return false;
+      // то же место должно быть свободно и фигурка — та же самая
+      return isLegalPlacement(st.players[0].board, item.patchId, {
+        orientation: action.orientation ?? 0,
+        r: action.r ?? 0,
+        c: action.c ?? 0,
+      });
+    }
+    case 'leather': {
+      if (st.phase !== 'placing' || action.r === undefined || action.c === undefined) return false;
+      return st.players[0].board[action.r * BOARD_SIZE + action.c] === -1;
+    }
+    default:
+      return false;
+  }
+}
 
 export interface OnlineGameScreenProps {
   session: MpSession;
@@ -70,30 +104,64 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
   const lastTimeoutToast = useRef<number | null>(null);
   const rematchNotified = useRef(false);
   const submitting = useRef(false);
+  /** ход в полёте — блокируем кнопки, чтобы второй тап не получил «busy»
+   *  (ref — чтобы applyView без перестроения читал актуальное значение) */
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const submitBusyRef = useRef(false);
   const notfoundStreak = useRef(0);
   /** последние события чужого хода (и их номер) — уходят в online-контекст */
   const remoteRef = useRef<{ events: GameEvent[] | null; id: number }>({ events: null, id: 0 });
   const applyViewRef = useRef<(view: MpRoomView, opts: { fromSubmit: boolean }) => void>(() => {});
 
   // ===== отправка хода на сервер =====
+  // Отклонённый ход НЕ показываем игроку сразу: гонки (соперник сходил, а
+  // push ещё в пути; автопасс просрочки в момент тапа; двойной тап) раньше
+  // давали «Ход не принят — попробуйте ещё раз», и игрок вручную повторял
+  // тот же ход. Теперь клиент повторяет его сам: подтягивает свежее
+  // состояние и, если ход всё ещё возможен, шлёт его ещё раз (до 2 попыток).
+  // Реально невозможный ход по-прежнему доходит до игрока с ошибкой.
   const submit = useCallback(
     async (action: NetAction): Promise<
       { ok: true; state: GameState; events: GameEvent[] } | { ok: false; error: string }
     > => {
       if (submitting.current) return { ok: false, error: 'busy' };
       submitting.current = true;
+      submitBusyRef.current = true;
+      setSubmitBusy(true);
       try {
-        const { view: v2 } = await mpMove({ code: session.code, playerId: session.playerId, action });
-        notfoundStreak.current = 0;
-        applyViewRef.current(v2, { fromSubmit: true });
-        if (v2.state && v2.events && v2.eventsVersion === v2.version) {
-          return { ok: true, state: v2.state, events: v2.events };
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const { view: v2 } = await mpMove({ code: session.code, playerId: session.playerId, action });
+            notfoundStreak.current = 0;
+            applyViewRef.current(v2, { fromSubmit: true });
+            if (v2.state && v2.events && v2.eventsVersion === v2.version) {
+              return { ok: true, state: v2.state, events: v2.events };
+            }
+            return { ok: true, state: v2.state!, events: [] };
+          } catch (e) {
+            const code = (e as { code?: string })?.code ?? 'net';
+            // сервер ОТКЛОНИЛ ход — значит, он НЕ применён, повторять безопасно
+            // (в отличие от сетевой ошибки: там ход мог примениться без ответа)
+            const retryable = code === 'notyourturn' || code === 'illegal' || code === 'conflict';
+            if (retryable && attempt < 2) {
+              try {
+                const { view } = await mpState({ code: session.code, playerId: session.playerId });
+                applyViewRef.current(view, { fromSubmit: false });
+                if (moveStillPossible(view, action)) {
+                  await new Promise((r) => setTimeout(r, 250));
+                  continue; // тот же ход ещё раз — молча
+                }
+              } catch {
+                /* сеть глухая — отдаём исходную ошибку как раньше */
+              }
+            }
+            return { ok: false, error: code };
+          }
         }
-        return { ok: true, state: v2.state!, events: [] };
-      } catch (e) {
-        return { ok: false, error: (e as { code?: string })?.code ?? 'net' };
       } finally {
         submitting.current = false;
+        submitBusyRef.current = false;
+        setSubmitBusy(false);
       }
     },
     [session.code, session.playerId],
@@ -175,6 +243,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         turnDeadline: view.turnDeadline,
         turnPaused: view.turnPaused,
         clockOffset: offset,
+        busy: submitBusyRef.current,
         submit,
         remoteEvents: remoteRef.current.events,
         remoteEventsId: remoteRef.current.id,
@@ -182,6 +251,12 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
     },
     [toast, submit],
   );
+
+  // флаг «ход в полёте» в онлайн-контексте — обновляем сразу, не дожидаясь
+  // следующего applyView (кнопки должны блокироваться в момент тапа)
+  useEffect(() => {
+    setOnline((o) => (o ? { ...o, busy: submitBusy } : o));
+  }, [submitBusy]);
 
   useEffect(() => {
     applyViewRef.current = applyView;
