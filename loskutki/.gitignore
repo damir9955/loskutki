@@ -34,3 +34,6 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# локальный снапшот онлайн-комнат (режим памяти при разработке)
+.mp-rooms.json

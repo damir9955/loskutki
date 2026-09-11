@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { code, playerId } = createRoom({
+    const { code, playerId } = await createRoom({
       name: body?.name,
       avatar: body?.avatar,
       isPublic: body?.isPublic,

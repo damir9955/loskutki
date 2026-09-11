@@ -32,12 +32,16 @@ import {
   mpErrorKey,
   mpJoin,
   mpListRooms,
+  mpOnRooms,
+  mpOnView,
   mpQuick,
   mpQuickCancel,
   mpState,
+  mpWsEnabled,
   saveProfile,
   type MpSession,
 } from '@/lib/net';
+import type { MpRoomView } from '@/lib/game/types';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 
@@ -85,35 +89,46 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
   // ВАЖНО: вылет из комнаты — только если сервер подтвердил «notfound»
   // 3 раза подряд (комната реально удалена, а не рестарт сервера).
   // Сетевые сбои — переподключение с бэкоффом.
+  // WS-режим: изменения приходят мгновенно push-ом (цикл — страховка).
   useEffect(() => {
     if (!session || !waiting) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     let backoff = POLL_MS;
     let notfound = 0;
+
+    const handleView = (view: MpRoomView) => {
+      if (stop) return;
+      if (view.code !== session.code) return;
+      if (view.status === 'playing' || view.status === 'finished') {
+        notfound = 0;
+        setReconnecting(false);
+        if (!playingNotified.current) {
+          playingNotified.current = true;
+          sound.ensure();
+          sound.tap();
+          onPlaying(session);
+        }
+        return;
+      }
+      if (view.status === 'abandoned') {
+        setReconnecting(false);
+        toast({ title: t('mp_gone') });
+        onSessionChange(null);
+        setWaiting(false);
+        return;
+      }
+      // status === 'waiting' — ждём дальше
+    };
+
+    // мгновенный старт партии: соперник вошёл — сокет пушнет view
+    const unsubView = mpWsEnabled() ? mpOnView(handleView) : null;
+
     const loop = async () => {
       try {
         const { view } = await mpState({ code: session.code, playerId: session.playerId });
         if (stop) return;
-        notfound = 0;
-        backoff = POLL_MS;
-        setReconnecting(false);
-        if (view.status === 'playing' || view.status === 'finished') {
-          if (!playingNotified.current) {
-            playingNotified.current = true;
-            sound.ensure();
-            sound.tap();
-            onPlaying(session);
-          }
-          return;
-        }
-        if (view.status === 'abandoned') {
-          toast({ title: t('mp_gone') });
-          onSessionChange(null);
-          setWaiting(false);
-          return;
-        }
-        // status === 'waiting' — ждём дальше
+        handleView(view);
       } catch (e) {
         if (stop) return;
         const errCode = (e as { code?: string })?.code ?? 'net';
@@ -149,6 +164,7 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     return () => {
       stop = true;
       clearTimeout(timer);
+      unsubView?.();
       document.removeEventListener('visibilitychange', onVisible);
     };
 
@@ -157,6 +173,11 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
   // ===== список открытых комнат (пока не ждём и не ищем) =====
   useEffect(() => {
     if (waiting || searching) return;
+    if (mpWsEnabled()) {
+      // WS-режим: сервер сам рассылает список открытых комнат (~3с)
+      const unsub = mpOnRooms((rooms) => setOpenRooms(rooms));
+      return unsub;
+    }
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {

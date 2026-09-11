@@ -37,6 +37,10 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "deno",
+    "scripts/run-server-bun.ts",
+    "scripts/test-deno-parity.ts",
+    "scripts/ws-e2e.ts"
   ]
 }

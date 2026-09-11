@@ -172,7 +172,8 @@ export function BotAvatar({ level, size = 56, thinking = false }: { level: BotLe
 }
 /** Карточка лоскутка на рынке: размер слева-сверху, фигурка по центру свободной зоны
  *  (выравнивание относительно её размера), справа столбик «цена → время → доход»,
- *  название по центру снизу */
+ *  название по центру снизу. tall — планшетная колонка: карточка вытягивается
+ *  по высоте родителя (flex-1) и фигурка становится крупной. */
 export function MarketCard({
   patchId,
   buttons,
@@ -180,6 +181,7 @@ export function MarketCard({
   selected,
   disabled,
   onSelect,
+  tall = false,
 }: {
   patchId: number;
   buttons: number;
@@ -187,6 +189,7 @@ export function MarketCard({
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
+  tall?: boolean;
 }) {
   const lang = useLang();
   const patch = PATCHES[patchId];
@@ -212,6 +215,7 @@ export function MarketCard({
         inc: patch.income,
       })}
       className={`stitched-card relative flex w-full min-w-0 flex-col items-center gap-0.5 px-1 pb-1 pt-1 transition-all [touch-action:none]
+        ${tall ? 'h-full' : ''}
         ${selected ? 'ring-4 ring-primary scale-[1.03] shadow-lg' : ''}
         ${!disabled && can ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]' : ''}
         ${!can ? 'opacity-60 grayscale-[.25]' : ''}`}
@@ -226,9 +230,10 @@ export function MarketCard({
       {/* фигурка — ПРОПОРЦИОНАЛЬНО реальному размеру лоскутка: большие заполняют
           зону, маленькие — заметно меньше (вписывается и по ширине, и по высоте —
           meet, viewBox раздут ровно настолько, какую долю занимает фигурка);
-          сверху отступ под плашку размера, бирки — обычный поток справа */}
-      <div className="flex h-[58px] w-full items-center">
-        <div className="h-full min-w-0 flex-1 pt-[12px]">
+          сверху отступ под плашку размера, бирки — обычный поток справа.
+          В tall-режиме зона гибкая (flex-1) — фигурка крупная */}
+      <div className={`flex w-full items-center ${tall ? 'min-h-0 flex-1' : 'h-[58px]'} ${tall ? 'mt-1' : ''}`}>
+        <div className={`h-full min-w-0 flex-1 ${tall ? '' : 'pt-[12px]'}`}>
           <svg
             viewBox={scaledGlyphViewBox(maxC, maxR, vbPad, patch.cells.length)}
             className="h-full w-full"
@@ -239,8 +244,8 @@ export function MarketCard({
           </svg>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-[2.5px] self-center">
-          <CardPill icon={<CoinIcon size={10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} />
-          <CardPill icon={<ClockIcon size={10} />} value={patch.time} title={t('m_time', { n: patch.time })} />
+          <CardPill icon={<CoinIcon size={tall ? 12 : 10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} />
+          <CardPill icon={<ClockIcon size={tall ? 12 : 10} />} value={patch.time} title={t('m_time', { n: patch.time })} />
           {/* доход — ПОД временем: зелёный если есть, красный с нулём если нет;
               иконка — ПЛЮСИК, тот же значок дохода, что над полотном */}
           <span
@@ -249,7 +254,7 @@ export function MarketCard({
             }`}
             title={patch.income > 0 ? t('m_inc_yes', { n: patch.income }) : t('m_inc_no')}
           >
-            <IncomeIcon size={10} />
+            <IncomeIcon size={tall ? 12 : 10} />
             {patch.income > 0 ? `+${patch.income}` : '0'}
           </span>
         </div>
@@ -265,7 +270,7 @@ export function MarketCard({
           </span>
         ) : (
           <span
-            className={`w-full truncate text-[10px] leading-none font-bold text-foreground/90 ${
+            className={`w-full truncate ${tall ? 'text-[11px]' : 'text-[10px]'} leading-none font-bold text-foreground/90 ${
               name.length > 12 ? 'text-left' : 'text-center'
             }`}
           >

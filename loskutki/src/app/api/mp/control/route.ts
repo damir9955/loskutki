@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cancelRoom, getRoom, leaveRoom, requestRematch } from '@/lib/server/rooms';
+import { roomControl } from '@/lib/server/rooms';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,19 +15,15 @@ export async function POST(req: Request) {
     const code = typeof body?.code === 'string' ? body.code : '';
     const playerId = typeof body?.playerId === 'string' ? body.playerId : '';
     const op = typeof body?.op === 'string' ? body.op : '';
-    const room = getRoom(code);
-    if (!room) return NextResponse.json({ ok: true, error: 'notfound' });
+    if (op !== 'leave' && op !== 'cancel' && op !== 'rematch') {
+      return NextResponse.json({ ok: false, error: 'badpayload' }, { status: 400 });
+    }
     try {
-      if (op === 'leave') leaveRoom(room, playerId);
-      else if (op === 'cancel') cancelRoom(room, playerId);
-      else if (op === 'rematch') {
-        const res = requestRematch(room, playerId);
-        return NextResponse.json({ ok: true, started: res.started });
-      } else return NextResponse.json({ ok: false, error: 'badpayload' }, { status: 400 });
+      const res = await roomControl(code, playerId, op);
+      return NextResponse.json({ ok: true, ...res });
     } catch (e) {
       return NextResponse.json({ ok: false, error: typeof e === 'string' ? e : 'notfound' }, { status: 409 });
     }
-    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false, error: 'badpayload' }, { status: 400 });
   }

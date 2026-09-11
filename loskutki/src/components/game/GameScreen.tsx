@@ -37,7 +37,6 @@ import type { GameEvent, GameState } from '@/lib/game/types';
 import {
   achDesc,
   achTitle,
-  logLine,
   patchName,
   personaDifficulty,
   personaInitial,
@@ -793,7 +792,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const trackNode = (
-        <div className="mt-1">
+        <div className={tablet ? 'w-[min(44vw,420px)] shrink-0' : 'mt-1'}>
           <TimeTrack
             positions={[me.time, bot.time]}
             activePlayer={state.activePlayer}
@@ -808,7 +807,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const statsNode = (
-        <div className="mt-1 flex items-center justify-center gap-1">
+        <div className={tablet ? 'grid shrink-0 grid-cols-2 gap-1' : 'mt-1 flex items-center justify-center gap-1'}>
           <BigStat icon={<CoinIcon size={17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} />
           <BigStat icon={<IncomeIcon size={16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} />
           <BigStat icon={<ClockIcon size={16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} />
@@ -829,7 +828,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   const boardNode = (
         <div className={tablet ? 'flex min-h-0 min-w-0 flex-1 items-center justify-center' : 'mt-1 flex min-h-0 flex-1 items-center justify-center'}>
-          <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full max-w-[640px]' : 'relative aspect-square max-h-full w-full max-w-[520px]'}>
+          <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full' : 'relative aspect-square max-h-full w-full max-w-[520px]'}>
             <QuiltBoard
               board={me.board}
               interactive={(placingNow || leatherHuman) && !busy && !dragActive}
@@ -947,22 +946,23 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const marketNode = (
-        <div className={tablet ? 'w-full' : 'mt-2'}>
+        <div className={tablet ? 'flex min-h-0 w-full flex-1 flex-col' : 'mt-2'}>
           <div
-            className={`${tablet ? 'flex w-full flex-col gap-2' : '-ml-1.5 flex gap-1.5'} transition-opacity ${
+            className={`${tablet ? 'flex min-h-0 flex-1 flex-col gap-2' : '-ml-1.5 flex gap-1.5'} transition-opacity ${
               placingNow && !dragActive ? 'pointer-events-none opacity-40' : 'opacity-100'
             }`}
           >
             {checks.map(({ m, check }) => (
               <div
                 key={m.marketIndex}
-                className={tablet ? 'w-full' : 'min-w-0 flex-1'}
+                className={tablet ? 'flex min-h-0 flex-1' : 'min-w-0 flex-1'}
                 onPointerDown={(e) => cardPointerDown(e, m.marketIndex, m.patchId)}
               >
                 <MarketCard
                   patchId={m.patchId}
                   buttons={me.buttons}
                   placeable={check.placeable}
+                  tall={tablet}
                   selected={
                     hint && hint.action === 'buy' && hint.marketIndex === m.marketIndex
                       ? true
@@ -975,7 +975,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             ))}
           </div>
           {/* Лента «дальше в пути»: все оставшиеся лоскутки круга, тап — карточка с данными */}
-          <div className="mt-1">
+          <div className={tablet ? 'mt-1 shrink-0' : 'mt-1'}>
             <UpcomingRibbon
               upcoming={upcoming}
               onSelect={(id) => {
@@ -1027,49 +1027,33 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         </button>
   );
 
-  const chronicleNode = (
-    <div className="stitched-card min-h-[120px] flex-1 overflow-y-auto p-3">
-      <div className="mb-1 text-[11px] font-extrabold tracking-wide text-muted-foreground uppercase">
-        {t('g_chronicle')}
-      </div>
-      {[...state.log].reverse().slice(0, 16).map((l, i) => (
-        <div
-          key={i}
-          className={`text-[12.5px] font-semibold ${l.player === 0 ? 'text-foreground' : 'text-muted-foreground'}`}
-        >
-          {logLine(lang, l)}
-        </div>
-      ))}
-    </div>
-  );
-
   return (
     <div
       className={
         tablet
-          ? 'mx-auto flex h-svh w-full max-w-[1280px] select-none flex-row gap-3 overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),6px)]'
+          ? 'mx-auto flex h-svh w-full max-w-[1600px] select-none flex-col overflow-hidden px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),6px)]'
           : 'mx-auto flex h-svh w-full max-w-[560px] select-none flex-col overflow-hidden px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),4px)]'
       }
     >
       {tablet ? (
-        <>
-          {/* планшет: сверху шапка, дорожка и статы; ниже — полотно слева,
-              а справа колонка соперника, рынка, шага вперёд и хроники */}
-          <div className="flex min-h-0 w-full flex-1 flex-col">
-            {headerNode}
+        <div className="flex min-h-0 w-full flex-1 flex-col">
+          {headerNode}
+          {/* компактная информационная полоса: дорожка времени + мои показатели + соперник
+              (дорожка и соперник — «по минимуму», главную площадь занимает полотно) */}
+          <div className="mt-1 flex min-h-0 shrink-0 items-center gap-2 overflow-hidden">
             {trackNode}
             {statsNode}
-            <div className="flex min-h-0 flex-1 gap-3">
-              {boardNode}
-              <aside className="flex w-[312px] shrink-0 flex-col gap-2 overflow-y-auto nice-scroll pb-1 pr-0.5 xl:w-[360px]">
-                {opponentNode}
-                {marketNode}
-                {advanceNode}
-                {chronicleNode}
-              </aside>
-            </div>
+            <div className="flex min-h-0 min-w-0 flex-1 items-center overflow-hidden">{opponentNode}</div>
           </div>
-        </>
+          {/* главная зона: полотно занимает максимум места, справа — рынок и шаг вперёд */}
+          <div className="mt-1 flex min-h-0 flex-1 gap-2">
+            {boardNode}
+            <aside className="flex w-[312px] shrink-0 flex-col gap-2 overflow-hidden pb-0.5 xl:w-[352px]">
+              {marketNode}
+              {advanceNode}
+            </aside>
+          </div>
+        </div>
       ) : (
         <div className="flex min-h-0 w-full flex-col">
           {headerNode}

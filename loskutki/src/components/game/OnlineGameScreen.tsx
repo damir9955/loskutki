@@ -25,16 +25,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameScreen, type OnlineCtx } from './GameScreen';
 import type { GameEvent, GameState, MpRoomView, NetAction } from '@/lib/game/types';
 import type { MpSession } from '@/lib/net';
-import { mpControl, mpErrorKey, mpMove, mpState } from '@/lib/net';
+import { mpControl, mpErrorKey, mpMove, mpOnNet, mpOnView, mpState, mpWsEnabled, mpWsReconnect } from '@/lib/net';
 import { t } from '@/lib/i18n';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
 const POLL_MS = 1500;
-/** сколько «notfound» подряд терпим (сервер мог рестартовать — он поднимет
- *  комнаты из снапшота; пара секунд здесь спасает партию) */
+/** без связи опрашиваем реже — не спамим, но и не бросаем партию */
+const POLL_LOST_MS = 3000;
+/** сколько «notfound» подряд терпим (пара секунд здесь спасает партию:
+ *  хранилище — источник правды, «notfound» может прийти лишь по-настоящему) */
 const NOTFOUND_RETRIES = 3;
+/** WS-режим: окно переподключения — потом предлагаем выйти в лобби
+ *  (сессия сохраняется — из хаба можно вернуться в партию) */
+const NET_FAIL_MS = 15_000;
 
 export interface OnlineGameScreenProps {
   session: MpSession;
@@ -55,6 +60,10 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
   const [connecting, setConnecting] = useState(true);
   /** нет связи с сервером — показываем плашку переподключения */
   const [netLost, setNetLost] = useState(false);
+  /** WS-режим: окно переподключения истекло (15с) — предлагаем выход */
+  const [netFail, setNetFail] = useState(false);
+  /** зеркало netLost для цикла опроса (интервал при потере связи) */
+  const netLostRef = useRef(false);
 
   const seenVersion = useRef(-1);
   const seenGameSeq = useRef(-1);
@@ -178,17 +187,20 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
     applyViewRef.current = applyView;
   }, [applyView]);
 
-  // ===== цикл опроса (у каждого запуска — свой флаг отмены) =====
+  // ===== связь с сервером: WS (мгновенные push) или поллинг =====
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = async () => {
+    let failTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // запрос состояния = заодно «переподключение»: в WS-режиме сервер
+    // прикрепляет сокет к комнате и дальше пушит изменения мгновенно
+    const fetchState = async () => {
       if (cancelled) return;
       try {
         const { view } = await mpState({ code: session.code, playerId: session.playerId });
         if (cancelled) return;
         notfoundStreak.current = 0;
-        setNetLost(false);
         applyViewRef.current(view, { fromSubmit: false });
       } catch (e) {
         if (cancelled) return;
@@ -202,13 +214,92 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
             onExit('error');
             return;
           }
-          // сервер мог рестартовать и поднимает комнаты из снапшота — ждём
+          // сервер мог рестартовать и поднимает комнаты — даём паузу и повтор
+          timer = setTimeout(() => void fetchState(), 1500);
+        }
+        // прочие сетевые ошибки — молча: их показывает статус-событие сокета
+      }
+    };
+
+    if (mpWsEnabled()) {
+      // ===== WS-режим: поллинга нет, ходы соперника приходят мгновенно =====
+      const unsubView = mpOnView((view) => {
+        if (!cancelled) applyViewRef.current(view, { fromSubmit: false });
+      });
+      const unsubNet = mpOnNet((connected) => {
+        if (cancelled) return;
+        if (connected) {
+          setNetLost(false);
+          setNetFail(false);
+          if (failTimer) {
+            clearTimeout(failTimer);
+            failTimer = null;
+          }
+          // подтягиваем пропущенное одним запросом
+          void fetchState();
         } else {
           setNetLost(true);
-          // сетевая ошибка — попробуем ещё раз
+          if (!failTimer) {
+            failTimer = setTimeout(() => {
+              if (!cancelled) setNetFail(true);
+            }, NET_FAIL_MS);
+          }
+        }
+      });
+      void fetchState();
+      const onVisible = () => {
+        if (document.visibilityState === 'visible' && !cancelled) {
+          // вкладка вернулась: сокет мог «уснуть» — поднимаем и синхронизируемся
+          mpWsReconnect();
+          void fetchState();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisible);
+      return () => {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+        if (failTimer) clearTimeout(failTimer);
+        unsubView();
+        unsubNet();
+        document.removeEventListener('visibilitychange', onVisible);
+      };
+    }
+
+    // ===== HTTP-режим (без NEXT_PUBLIC_WS_URL): поллинг как раньше =====
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const { view } = await mpState({ code: session.code, playerId: session.playerId });
+        if (cancelled) return;
+        notfoundStreak.current = 0;
+        if (netLostRef.current) {
+          netLostRef.current = false;
+          setNetLost(false);
+        }
+        applyViewRef.current(view, { fromSubmit: false });
+      } catch (e) {
+        if (cancelled) return;
+        const code = (e as { code?: string })?.code ?? 'net';
+        if (code === 'notfound') {
+          notfoundStreak.current++;
+          if (notfoundStreak.current > NOTFOUND_RETRIES) {
+            // комната действительно исчезла — уходим, но сессию НЕ стираем:
+            // вдруг это наш сетевой сбой — из хаба можно попробовать вернуться
+            toast({ title: t('mp_gone') });
+            onExit('error');
+            return;
+          }
+          // ждём: хранилище могло мигнуть
+        } else {
+          netLostRef.current = true;
+          setNetLost(true);
+          // сетевая ошибка — попробуем ещё раз (реже)
         }
       }
-      if (!cancelled) timer = setTimeout(poll, POLL_MS);
+      if (!cancelled) {
+        const next = netLostRef.current ? POLL_LOST_MS : POLL_MS;
+        timer = setTimeout(poll, next);
+      }
     };
     void poll();
     const onVisible = () => {
@@ -221,6 +312,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      if (failTimer) clearTimeout(failTimer);
       document.removeEventListener('visibilitychange', onVisible);
     };
 
@@ -252,6 +344,12 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
       toast({ title: t(mpErrorKey((e as { code?: string })?.code ?? '')) });
     }
   }, [session.code, session.playerId, toast]);
+
+  // ===== провал переподключения: выходим в лобби, сессию храним =====
+  const netFailExit = useCallback(() => {
+    sound.tap();
+    onExit('error');
+  }, [onExit]);
 
   // ===== соперник покинул партию =====
   if (abandoned) {
@@ -288,14 +386,29 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
 
   return (
     <>
-      {netLost && (
+      {netLost && !netFail && (
         <div className="pointer-events-none fixed inset-x-0 top-[max(env(safe-area-inset-top),10px)] z-40 flex justify-center px-4">
           <div className="flex items-center gap-2 rounded-full bg-[#C33A2F]/92 px-4 py-2 shadow-xl">
             <span className="relative flex h-2.5 w-2.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
             </span>
-            <span className="text-[12.5px] font-extrabold text-white">{t('mp_reconnect')}</span>
+            <span className="text-[12.5px] font-extrabold text-white">{t('mp_net_lost')}</span>
+          </div>
+        </div>
+      )}
+      {netFail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2B2118]/70 p-4 backdrop-blur-sm">
+          <div className="pop-in stitched-card w-full max-w-sm p-5 text-center">
+            <div className="font-display text-[26px] text-destructive">{t('mp_net_fail_t')}</div>
+            <div className="mt-1.5 text-[14px] font-bold text-muted-foreground">{t('mp_net_fail_d')}</div>
+            <Button
+              size="lg"
+              className="btn-wood mt-5 h-13 w-full rounded-2xl text-[16px] font-extrabold"
+              onClick={netFailExit}
+            >
+              {t('mp_back')}
+            </Button>
           </div>
         </div>
       )}
