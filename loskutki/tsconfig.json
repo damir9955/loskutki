@@ -44,6 +44,9 @@
     "scripts/test-deno-parity.ts",
     "scripts/ws-e2e.ts",
     "scripts/kv-restart-test.ts",
-    "scripts/kv-two-isolates-test.ts"
+    "scripts/kv-two-isolates-test.ts",
+    "scripts/test-gameover.ts",
+    "scripts/drive-foe.ts",
+    "scripts/join-idle.ts"
   ]
 }

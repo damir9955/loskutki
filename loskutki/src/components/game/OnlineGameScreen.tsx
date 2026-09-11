@@ -234,6 +234,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
       const offset = view.serverNow - Date.now();
       setOnline({
         roomCode: view.code,
+        gameSeq: view.gameSeq,
         opponent: {
           name: view.foe?.name ?? '',
           avatar: view.foe?.avatar ?? 'ann',
@@ -491,7 +492,9 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         key={`online-${gameSeq}`}
         state={game}
         onState={setGame}
-        onExit={() => doLeave(true)}
+        // партия завершена — выход с финального экрана не переспрашивает
+        // «точно выйти?» (этот вопрос уместен только посреди партии)
+        onExit={() => doLeave(game.phase !== 'gameover')}
         onRematch={() => void doRematch()}
         onOpenRules={onOpenRules}
         online={online}

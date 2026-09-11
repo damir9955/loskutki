@@ -142,7 +142,9 @@ export function Portrait({
         width={size}
         height={size}
         draggable={false}
-        className="h-full w-full rounded-full object-cover"
+        // block: без него inline-img выравнивается по базовой линии текста и
+        // снизу остаётся щель ~5-7px — аватар «не заполнял» свою рамку
+        className="block h-full w-full rounded-full object-cover"
         style={{ boxShadow: 'inset 0 0 0 2px rgba(169,133,90,.55), 0 1px 3px rgba(90,60,25,.35)' }}
       />
       {/* стёжка-ободок поверх фото */}

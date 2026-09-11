@@ -2275,7 +2275,7 @@ export function setTestLastPoll(code: string, playerId: string, ts: number): boo
   return true;
 }
 
-/** статистика для health-страницы */
+/** статистика для health-страницы (синхронная — для bun-реплики, режим памяти) */
 export function serverStats(): { waiting: number; playing: number; sockets: number; uptimeSec: number; kv: boolean } {
   let waiting = 0;
   let playing = 0;
@@ -2293,12 +2293,51 @@ export function serverStats(): { waiting: number; playing: number; sockets: numb
   return { waiting, playing, sockets: live, uptimeSec: Math.floor((Date.now() - startedAt) / 1000), kv: kvOn };
 }
 
+/** Статистика health-страницы Deno Deploy: СВЕЖИЙ проход по KV (общее
+ *  хранилище ВСЕХ изолятов), а не сокеты этого узла. HTTP-запрос к /
+ *  может прилететь на «чужой» изолят — не тот, где живут WebSocket-игроки,
+ *  и раньше из-за этого «Игроков на связи» показывал 0, хотя шла партия.
+ *  Присутствие игрока = lastPoll свежее 45с (изолят-владелец сокетов
+ *  освежает его в KV не реже раза в 30с) и он не вышел осознанно. */
+export async function serverStatsA(): Promise<{
+  waiting: number;
+  playing: number;
+  players: number;
+  sockets: number;
+  uptimeSec: number;
+  kv: boolean;
+}> {
+  const now = Date.now();
+  let waiting = 0;
+  let playing = 0;
+  let players = 0;
+  const countRoom = (room: MpRoom): void => {
+    if (room.status === 'waiting') waiting++;
+    else if (room.status === 'playing' || room.status === 'finished') playing++;
+    for (const p of [room.host, room.guest]) {
+      if (p && p.leftAt === null && now - p.lastPoll < 45_000) players++;
+    }
+  };
+  if (kv) {
+    try {
+      for await (const e of kv.list({ prefix: ['room'] })) {
+        if (e.value) countRoom(e.value as MpRoom);
+      }
+    } catch { /* KV мигнул — статистика не критична */ }
+  } else {
+    for (const r of rooms.values()) countRoom(r);
+  }
+  let live = 0;
+  for (const s of sockets.values()) if (s.alive) live++;
+  return { waiting, playing, players, sockets: live, uptimeSec: Math.floor((now - startedAt) / 1000), kv: kvOn };
+}
+
 // ============================================================
 // 8. HTTP + ЗАПУСК DENO DEPLOY
 // ============================================================
 
-function healthHtml(): string {
-  const st = serverStats();
+async function healthHtml(): Promise<string> {
+  const st = await serverStatsA();
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -2321,7 +2360,7 @@ function healthHtml(): string {
     <h1>🧵 Лоскутки: сервер онлайн</h1>
     <p>WebSocket-сервер мультиплеера работает.</p>
     <p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
-    <p>Игроков на связи: ${st.sockets} · без перезапуска: ${st.uptimeSec} с</p>
+    <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
     <p>Хранение: ${st.kv ? 'Deno KV — комнаты переживают перезапуск' : 'память (перезапуск очистит комнаты)'}</p>
     <span class="ok">Готов к игре</span>
   </div>
@@ -2351,7 +2390,7 @@ if (import.meta.main) {
   }
   interface DenoApi {
     env?: { get(k: string): string | undefined };
-    serve(opts: unknown, handler: (req: Request) => Response): void;
+    serve(opts: unknown, handler: (req: Request) => Response | Promise<Response>): void;
     upgradeWebSocket(req: Request): { socket: DenoWsSocket; response: unknown };
     openKv?: (path?: string) => unknown;
   }
@@ -2390,8 +2429,8 @@ if (import.meta.main) {
       ` · канал изолятов: ${chanLike ? 'включён' : 'выключен'}`,
   );
 
-  D.serve({ port }, (req: Request): Response => {
-    // WebSocket-соединение (любой путь)
+  D.serve({ port }, async (req: Request): Promise<Response> => {
+    // WebSocket-соединение (любой путь) — без await до апгрейда
     const upgrade = req.headers.get('upgrade')?.toLowerCase() ?? '';
     if (upgrade.includes('websocket')) {
       const { socket, response } = D.upgradeWebSocket(req);
@@ -2416,9 +2455,13 @@ if (import.meta.main) {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
     if (url.pathname === '/' || url.pathname === '/health') {
-      return new Response(healthHtml(), {
-        headers: { 'content-type': 'text/html; charset=utf-8', ...corsHeaders() },
-      });
+      try {
+        return new Response(await healthHtml(), {
+          headers: { 'content-type': 'text/html; charset=utf-8', ...corsHeaders() },
+        });
+      } catch {
+        return new Response('ok', { status: 200, headers: corsHeaders() });
+      }
     }
     return new Response('Not Found', { status: 404, headers: corsHeaders() });
   });

@@ -94,6 +94,9 @@ export interface GameScreenProps {
 /** Контекст онлайн-партии (состояние уже «повёрнуто» — я всегда игрок 0) */
 export interface OnlineCtx {
   roomCode: string;
+  /** номер партии в комнате (растёт после каждого реванша) — защита
+   * от повторной записи статистики при перезагрузке страницы финала */
+  gameSeq: number;
   opponent: { name: string; avatar: string; connected: boolean; left: boolean };
   /** дедлайн хода по часам сервера (epoch ms) */
   turnDeadline: number | null;
@@ -324,32 +327,51 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     })();
   }, [state, applyResult, persona, botTick]);
 
-  // ===== КОНЕЦ ПАРТИИ: СТАТИСТИКА (офлайн; онлайн не пишется в историю) =====
+  // ===== КОНЕЦ ПАРТИИ: СТАТИСТИКА + ФИНАЛЬНЫЙ ЭКРАН =====
+  // Работает и в онлайне: когда сервер довёл партию до gameover, вид приходит
+  // обоим игрокам (push/ответ на ход), но раньше без этого эффекта финал
+  // просто «висел» в игровой вёрстке — экран результатов не показывался ни у
+  // кого. Онлайн-вид повёрнут ко мне (я всегда игрок 0), поэтому
+  // winner===0 = моя победа, и записи статистики корректны у обеих сторон.
+  // Перезагрузка страницы финишированной комнаты НЕ должна записывать партию
+  // повторно — маркер «код#gameSeq» в localStorage (одна запись на партию).
   useEffect(() => {
-    if (state.phase === 'gameover' && !recorded.current && state.mode !== 'online') {
+    if (state.phase === 'gameover' && !recorded.current && state.result) {
       recorded.current = true;
-      const r = state.result!;
-      const store = loadStore();
-      const summary: GameSummary = {
-        won: r.winner === 0,
-        score: r.scores[0].total,
-        botLevel: state.botLevel,
-        coverage: state.players[0].covered,
-        leatherPlaced: state.players[0].board.filter((v) => v === LEATHER_ID).length,
-        tile7x7: state.players[0].tile7x7,
-        finalButtons: state.players[0].buttons,
-        mode: state.mode,
-        dailyKey: state.mode === 'daily' ? todayKey() : undefined,
-      };
-      const { store: next, unlocked } = recordGame(store, summary);
-      next.currentGame = null;
-      saveStore(next);
-      for (const a of unlocked) {
-        toast({ title: t('g_ach', { icon: a.icon, title: achTitle(lang, a.id) }), description: achDesc(lang, a.id) });
+      let alreadyRecorded = false;
+      if (state.mode === 'online' && online) {
+        const KEY = 'loskutki.mp.recorded.v1';
+        const marker = JSON.stringify(`${online.roomCode}#${online.gameSeq}`);
+        try {
+          if (localStorage.getItem(KEY) === marker) alreadyRecorded = true;
+          else localStorage.setItem(KEY, marker);
+        } catch { /* localStorage недоступен — пишем как раньше */ }
+      }
+      if (!alreadyRecorded) {
+        const r = state.result;
+        const store = loadStore();
+        const summary: GameSummary = {
+          won: r.winner === 0,
+          score: r.scores[0].total,
+          botLevel: state.botLevel,
+          coverage: state.players[0].covered,
+          leatherPlaced: state.players[0].board.filter((v) => v === LEATHER_ID).length,
+          tile7x7: state.players[0].tile7x7,
+          finalButtons: state.players[0].buttons,
+          mode: state.mode,
+          dailyKey: state.mode === 'daily' ? todayKey() : undefined,
+        };
+        const { store: next, unlocked } = recordGame(store, summary);
+        // офлайн-партию из localStorage убираем; онлайн живёт на сервере
+        if (state.mode !== 'online') next.currentGame = null;
+        saveStore(next);
+        for (const a of unlocked) {
+          toast({ title: t('g_ach', { icon: a.icon, title: achTitle(lang, a.id) }), description: achDesc(lang, a.id) });
+        }
       }
       setTimeout(() => setEndedShown(true), FAST ? 200 : 900);
     }
-  }, [state, toast]);
+  }, [state, toast, lang, online]);
 
   // ===== ДЕЙСТВИЯ ЧЕЛОВЕКА =====
   const selectPatch = useCallback(
@@ -659,6 +681,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const bigPort = useIsBigPortrait();
   /** любой «большой» экран — крупная лента «дальше в пути» и пр. */
   const big = tablet || bigPort;
+  /** аватар соперника: побольше на каждом размере экрана, чтобы круглое фото
+   *  заполняло свою рамку, а не «плавало» в ней (было 32 везде) */
+  const foeIconSize = tablet ? 46 : bigPort ? 40 : 36;
   /** онлайн: ход в полёте — блокируем ввод, чтобы второй тап не дал отказ */
   const onlineBusy = online?.busy ?? false;
 
@@ -749,12 +774,18 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const opponentNode = (
-        <div className="stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0">
-          <div className="rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
+        <div
+          className={`stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0 ${
+            // планшет (ландшафт): карточка заполняет всю высоту полосы с дорожкой —
+            // иначе вокруг маленькой карточки соперника оставались пустые поля
+            tablet ? 'self-stretch' : ''
+          }`}
+        >
+          <div className="flex shrink-0 items-center justify-center rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
             {foeAvatar ? (
-              <Portrait src={foeAvatar} size={32} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
+              <Portrait src={foeAvatar} size={foeIconSize} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
             ) : (
-              <BotAvatar level={state.botLevel} size={32} thinking={busy && state.activePlayer === 1} />
+              <BotAvatar level={state.botLevel} size={foeIconSize} thinking={busy && state.activePlayer === 1} />
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -794,7 +825,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
-                  {foeAvatar ? <Portrait src={foeAvatar} size={32} alt={foeName} /> : <BotAvatar level={state.botLevel} size={32} />} {foeName}
+                  {foeAvatar ? <Portrait src={foeAvatar} size={foeIconSize} alt={foeName} /> : <BotAvatar level={state.botLevel} size={foeIconSize} />} {foeName}
                 </SheetTitle>
               </SheetHeader>
               <div className="px-4 pb-6">
@@ -1076,7 +1107,9 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           <div className="mt-1 flex min-h-0 shrink-0 items-center gap-2 overflow-hidden">
             {trackNode}
             {statsNode}
-            <div className="flex min-h-0 min-w-0 flex-1 items-center overflow-hidden">{opponentNode}</div>
+            <div className={`flex min-h-0 min-w-0 flex-1 items-center overflow-hidden ${tablet ? 'self-stretch' : ''}`}>
+              {opponentNode}
+            </div>
           </div>
           {/* главная зона: полотно занимает максимум места, справа — рынок и шаг вперёд.
               Колонка рынка ТЕКУЧАЯ (26% ширины, 280–420px): на широких планшетах
