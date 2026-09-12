@@ -198,6 +198,7 @@ const DICT: Record<string, [string, string]> = {
   g_board_aria: ['Ваше лоскутное полотно', 'Your quilt board'],
   g_empty: ['пусто', 'empty'],
   g_view_rival: ['Посмотреть полотно соперника', "View rival's quilt"],
+  g_view_rival_short: ['Полотно', 'Quilt'],
   g_tile7x7: ['Спецплитка 7×7', '7×7 special tile'],
 
   // — тосты и подсказки —

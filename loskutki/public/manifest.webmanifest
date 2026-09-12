@@ -4,7 +4,7 @@
   "description": "Мобильная игра по мотивам настольного Patchwork: сшивайте полотно из лоскутков и обыгрывайте бота.",
   "start_url": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#F3E9D2",
   "theme_color": "#F3E9D2",
   "lang": "ru",

@@ -1335,7 +1335,13 @@ export function tick(room: MpRoom): void {
       const live = absent <= CONNECTED_MS || ownerSocketAlive(room, owner);
       if (live && expiredBy < grace) break;
     }
-    if (!explicitLeft && absent > CONNECTED_MS && absent < OWNER_ABSENT_CAP_MS) {
+    // заморозка — только для ПО-НАСТОЯЩЕМУ пропавших (сокета нет, давно
+    // не опрашивал). Владелец с ЖИВЫМ сокетом подключён — его просрочку
+    // играем сразу после грайса: раньше lastPoll протухал между освежениями
+    // дворника (30с) и подключённый, но пассивный игрок «висел» на паузе
+    // до получаса — соперник ждал автопасс, который не наступал
+    const ownerLive = ownerSocketAlive(room, owner) || absent <= CONNECTED_MS;
+    if (!explicitLeft && !ownerLive && absent < OWNER_ABSENT_CAP_MS) {
       // пропал совсем недавно — замораживаем таймер и ждём его
       room.frozen = true;
       room.turnDeadline = Date.now() + 5_000; // перепроверим через 5с
@@ -1480,12 +1486,21 @@ function rotatedState(state: GameState, seat: 0 | 1, room: MpRoom): GameState {
   return s;
 }
 
-/** Полный вид комнаты для игрока (после тика таймаутов) */
+/** Полный вид комнаты для игрока. ФУНКЦИЯ ЧИСТАЯ: не тикает и не
+ *  обновляет присутствие — тик/тач меняют комнату, а viewFor зовётся
+ *  и из broadcastRoom, где результат мутаций НЕ сохранялся бы в KV.
+ *  РАНЬШЕ так «пропадали фигуры»: тик внутри broadcast автопаассил
+ *  просроченный ход, вид с версией N+1 (автопасс применён) уходил обоим,
+ *  но в KV оставалась версия N без автопаасса; следующий настоящий ход
+ *  читал KV, применялся к ДОавтопассному состоянию и получал ту же
+ *  версию N+1 — клиент считал ответ «не новым» и откатывал автопаасс
+ *  (кожаный лоскуток исчезал с доски, начисленные пуговки «забирались»).
+ *  Теперь все изменения комнаты идут ТОЛЬКО через mutateRoom (CAS-запись):
+ *  тик — в roomStateA/applyAction (внутри CAS) и у дворника (свой CAS),
+ *  broadcast шлёт уже сохранённое состояние. */
 export function viewFor(room: MpRoom, playerId: string): MpRoomView {
   const seat = seatOf(room, playerId);
   if (seat === null) throw 'notfound';
-  tick(room);
-  touch(room, seat);
   const me = seat === 0 ? room.host : room.guest!;
   const foe = seat === 0 ? room.guest : room.host;
   const now = Date.now();
@@ -1560,10 +1575,17 @@ export async function joinRoomA(input: { code: unknown; name: unknown; avatar: u
   return { code, playerId: out.result, room: out.room };
 }
 
-/** текущий вид комнаты для игрока (touch присутствия) */
+/** текущий вид комнаты для игрока (touch присутствия + тик просрочек —
+ *  изменения сохраняются CAS-записью, поэтому тик здесь БЕЗОПАСЕН) */
 export async function roomStateA(code: string, playerId: string): Promise<{ view: MpRoomView; room: MpRoom }> {
   const out = await mutateRoom(code.trim().toUpperCase(), (room) => {
     revive(room);
+    const seat = seatOf(room, playerId);
+    if (seat === null) throw 'notfound';
+    // ПРИСУТСТВИЕ ДО ТИКА (как в applyAction): вернувшийся игрок не должен
+    // получить автопаасс в спину — сначала отмечаем его и снимаем заморозку
+    touch(room, seat);
+    tick(room);
     return { result: viewFor(room, playerId) };
   });
   return { view: out.result, room: out.room };

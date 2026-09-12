@@ -773,12 +773,37 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   );
 
+  /** шторка с полотном соперника (общая для полной и мини-карточки) */
+  const foeBoardSheet = (
+    <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
+      <SheetHeader>
+        <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
+          {foeAvatar ? <Portrait src={foeAvatar} size={foeIconSize} alt={foeName} /> : <BotAvatar level={state.botLevel} size={foeIconSize} />} {foeName}
+        </SheetTitle>
+      </SheetHeader>
+      <div className="px-4 pb-6">
+        <MiniQuilt board={bot.board} className="w-full rounded-xl border-2 border-border" />
+        <div className="mt-3 flex justify-center gap-2">
+          <BigStat icon={<CoinIcon size={22} />} value={bot.buttons} label={t('g_buttons')} />
+          <BigStat icon={<IncomeIcon size={22} />} value={bot.income} label={t('g_income')} />
+        </div>
+        {quip && (
+          <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-center text-[13px] font-semibold italic text-muted-foreground">
+            «{quip}»
+          </div>
+        )}
+      </div>
+    </SheetContent>
+  );
+
+  /** карточка соперника (полная, горизонтальная) — телефон и планшет-ландшафт
+   *  (в ландшафте живёт ВЕРХНЕЙ строкой колонки рынка — «в ряд с фигурами
+   *  выбора», а не болтается по левому краю информационной полосы) */
   const opponentNode = (
         <div
           className={`stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0 ${
-            // планшет (ландшафт): карточка заполняет всю высоту полосы с дорожкой —
-            // иначе вокруг маленькой карточки соперника оставались пустые поля
-            tablet ? 'self-stretch' : ''
+            // планшет (ландшафт): строка в колонке рынка — тянется на её ширину
+            tablet ? 'w-full shrink-0 self-stretch' : ''
           }`}
         >
           <div className="flex shrink-0 items-center justify-center rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
@@ -822,28 +847,59 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                 <span className="text-[8.5px] font-extrabold leading-none text-foreground/80">{bot.covered}</span>
               </button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-[min(92vw,380px)] overflow-y-auto nice-scroll">
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2 font-display text-[20px]">
-                  {foeAvatar ? <Portrait src={foeAvatar} size={foeIconSize} alt={foeName} /> : <BotAvatar level={state.botLevel} size={foeIconSize} />} {foeName}
-                </SheetTitle>
-              </SheetHeader>
-              <div className="px-4 pb-6">
-                <MiniQuilt board={bot.board} className="w-full rounded-xl border-2 border-border" />
-                <div className="mt-3 flex justify-center gap-2">
-                  <BigStat icon={<CoinIcon size={22} />} value={bot.buttons} label={t('g_buttons')} />
-                  <BigStat icon={<IncomeIcon size={22} />} value={bot.income} label={t('g_income')} />
-                </div>
-                {quip && (
-                  <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-center text-[13px] font-semibold italic text-muted-foreground">
-                    «{quip}»
-                  </div>
-                )}
-              </div>
-            </SheetContent>
+            {foeBoardSheet}
           </Sheet>
         </div>
 
+  );
+
+  /** компактная ВЕРТИКАЛЬНАЯ карточка соперника — для bigPort: стоит четвёртой
+   *  В РЯД КАРТОЧЕК РЫНКА (просьба пользователя: «ячейка соперника — в ряд
+   *  с фигурами выбора, а не по левому краю») и освобождает целую строку
+   *  сверху — полотно становится крупнее */
+  const opponentMiniNode = (
+    <div className="stitched-card fabric-lattice flex h-full w-[clamp(150px,25vw,196px)] shrink-0 flex-col justify-between gap-0.5 px-1.5 py-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center justify-center rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
+          {foeAvatar ? (
+            <Portrait src={foeAvatar} size={34} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
+          ) : (
+            <BotAvatar level={state.botLevel} size={34} thinking={busy && state.activePlayer === 1} />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[11.5px] font-extrabold text-foreground">{foeName}</div>
+          <div className={`truncate text-[9px] font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'}`}>{foeSub}</div>
+        </div>
+      </div>
+      <div className="flex items-center justify-center gap-1">
+        <EnemyTile icon={<CoinIcon size={13} />} value={bot.buttons} title={t('g_rival_buttons')} />
+        <EnemyTile icon={<IncomeIcon size={13} />} value={`+${bot.income}`} title={t('g_rival_income')} />
+        <EnemyTile
+          icon={<ClockIcon size={13} />}
+          value={<>{bot.time}<span className="text-[8px] font-bold text-muted-foreground">/53</span></>}
+          title={t('g_rival_time', { t: bot.time })}
+        />
+        {bot.tile7x7 && (
+          <div className="pop-in flex h-8 w-7 items-center justify-center text-[13px]" title={t('g_tile7x7')}>
+            🏅
+          </div>
+        )}
+      </div>
+      <Sheet open={showBotBoard} onOpenChange={setShowBotBoard}>
+        <SheetTrigger asChild>
+          <button
+            type="button"
+            className="btn-cloth flex h-9 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl"
+            aria-label={t('g_view_rival')}
+          >
+            <BoardFillIcon size={16} covered={bot.covered} />
+            <span className="text-[10.5px] font-extrabold leading-none text-foreground/80">{t('g_view_rival_short')}</span>
+          </button>
+        </SheetTrigger>
+        {foeBoardSheet}
+      </Sheet>
+    </div>
   );
 
   const trackNode = (
@@ -1030,6 +1086,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                 />
               </div>
             ))}
+            {/* bigPort: ячейка соперника — ЧЕТВЁРТОЙ в ряд карточек рынка
+                (вместо отдельной строки сверху) — ряд заполняется целиком,
+                а полотно получает освободившуюся высоту */}
+            {!tablet && bigPort && <div className="flex shrink-0 self-stretch">{opponentMiniNode}</div>}
           </div>
           {/* Лента «дальше в пути»: все оставшиеся лоскутки круга, тап — карточка с данными */}
           <div className={tablet ? 'mt-1 shrink-0' : 'mt-1'}>
@@ -1052,7 +1112,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           onClick={doAdvance}
           disabled={!myTurn || busy || onlineBusy}
           className={`btn-wood mt-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 ${
-            bigPort ? 'h-14' : 'h-12'
+            tablet ? 'h-16' : bigPort ? 'h-14' : 'h-12'
           } ${
             forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
           } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
@@ -1102,31 +1162,36 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       {tablet ? (
         <div className="flex min-h-0 w-full flex-1 flex-col">
           {headerNode}
-          {/* компактная информационная полоса: дорожка времени + мои показатели + соперник
-              (дорожка и соперник — «по минимуму», главную площадь занимает полотно) */}
+          {/* информационная полоса: дорожка + мои показатели + «Шагнуть вперёд».
+              Полоса заполняется ЦЕЛИКОМ по ширине (раньше справа от карточки
+              соперника оставалось ~350px пустоты — «пустое место на широком
+              экране»). Соперник переехал в колонку рынка. */}
           <div className="mt-1 flex min-h-0 shrink-0 items-center gap-2 overflow-hidden">
             {trackNode}
             {statsNode}
-            <div className={`flex min-h-0 min-w-0 flex-1 items-center overflow-hidden ${tablet ? 'self-stretch' : ''}`}>
-              {opponentNode}
+            <div className="flex min-h-0 min-w-0 flex-1 items-center overflow-hidden pl-1">
+              {advanceNode}
             </div>
           </div>
-          {/* главная зона: полотно занимает максимум места, справа — рынок и шаг вперёд.
-              Колонка рынка ТЕКУЧАЯ (26% ширины, 280–420px): на широких планшетах
-              карточки и лента крупнеют вместе с экраном, а не «висят» мелкими
-              при пустых полях по бокам */}
+          {/* главная зона: полотно занимает максимум места; справа — колонка
+              рынка с СОПЕРНИКОМ первой строкой («в ряд с фигурами выбора»,
+              а не по левому краю полосы) и крупными карточками.
+              Колонка ТЕКУЧАЯ (30% ширины, 300–440px): на широких планшетах
+              карточки и лента крупнеют вместе с экраном */}
           <div className="mt-1 flex min-h-0 flex-1 gap-2">
             {boardNode}
             <aside className="flex w-[clamp(300px,30vw,440px)] shrink-0 flex-col gap-2 overflow-hidden pb-0.5">
+              {opponentNode}
               {marketNode}
-              {advanceNode}
             </aside>
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 w-full flex-col">
           {headerNode}
-          {opponentNode}
+          {/* телефон: соперник — полной строкой сверху; bigPort — соперник
+              уехал в ряд карточек рынка (см. opponentMiniNode) */}
+          {!bigPort && opponentNode}
           {trackNode}
           {statsNode}
           {boardNode}

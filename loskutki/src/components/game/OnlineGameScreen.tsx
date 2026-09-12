@@ -140,6 +140,17 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
             return { ok: true, state: v2.state!, events: [] };
           } catch (e) {
             const code = (e as { code?: string })?.code ?? 'net';
+            // 'net' — ОТВЕТ ПОТЕРЯН, а ход мог примениться: сразу тянем свежее
+            // состояние, иначе доска «висит» без только что купленной фигуры
+            // до следующего пуша (игрок видел: пуговицы списаны, фигуры нет)
+            if (code === 'net') {
+              try {
+                const { view } = await mpState({ code: session.code, playerId: session.playerId });
+                applyViewRef.current(view, { fromSubmit: false });
+              } catch {
+                /* сеть глухая — статус покажет плашка переподключения */
+              }
+            }
             // сервер ОТКЛОНИЛ ход — значит, он НЕ применён, повторять безопасно
             // (в отличие от сетевой ошибки: там ход мог примениться без ответа)
             const retryable = code === 'notyourturn' || code === 'illegal' || code === 'conflict';

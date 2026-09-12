@@ -514,12 +514,14 @@ function rotatedState(state: GameState, seat: 0 | 1, room: MpRoom): GameState {
   return s;
 }
 
-/** Полный вид комнаты для игрока (после тика таймаутов) */
+/** Полный вид комнаты для игрока. ФУНКЦИЯ ЧИСТАЯ (не тикает и не трогает
+ *  присутствие — это делают вызывающие ДО сохранения, см. roomState/roomMove):
+ *  иначе мутации из «чтения» могли бы не сохраниться и следущий ход
+ *  откатывал бы автопаасс — в WS-версии сервера это уже ловили, здесь
+ *  выравниваем ту же схему) */
 export function viewFor(room: MpRoom, playerId: string): MpRoomView {
   const seat = seatOf(room, playerId);
   if (seat === null) throw 'notfound';
-  tick(room);
-  touch(room, seat);
   const me = seat === 0 ? room.host : room.guest!;
   const foe = seat === 0 ? room.guest : room.host;
   const now = Date.now();
@@ -611,8 +613,10 @@ export async function roomState(code: string, playerId: string): Promise<MpRoomV
   const seat = seatOf(loaded.room, playerId);
   if (seat === null) throw 'notfound';
   const mark = markOf(loaded.room);
-  tick(loaded.room);
+  // ПРИСУТСТВИЕ ДО ТИКА: вернувшийся игрок не должен получить автопаасс
+  // в спину — сначала отмечаем его и снимаем заморозку
   touch(loaded.room, seat);
+  tick(loaded.room);
   if (changed(loaded.room, mark)) {
     try {
       await store.save(loaded.room, loaded.rev);
