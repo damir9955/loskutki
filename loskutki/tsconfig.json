@@ -49,6 +49,7 @@
     "scripts/drive-foe.ts",
     "scripts/join-idle.ts",
     "scripts/test-autopass-persist.ts",
-    "scripts/probe-timeout.ts"
+    "scripts/probe-timeout.ts",
+    "scripts/test-quick-visible.ts"
   ]
 }

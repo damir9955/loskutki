@@ -13,7 +13,7 @@
  */
 
 import type { MpRoomView, NetAction } from './game/types';
-import { getWs, wsEnabled } from './ws';
+import { getWs, wsEnabled, type OpenRoomInfo } from './ws';
 
 export interface MpSession {
   playerId: string;
@@ -183,15 +183,15 @@ export async function mpQuickCancel(playerId: string): Promise<{ ok?: boolean }>
   return post<{ ok?: boolean }>('/api/mp/quick', { playerId, op: 'cancel' });
 }
 
-export async function mpListRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>> {
+export async function mpListRooms(): Promise<OpenRoomInfo[]> {
   if (wsEnabled()) {
-    const r = await getWs().request<{ rooms?: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }> }>('rooms');
+    const r = await getWs().request<{ rooms?: OpenRoomInfo[] }>('rooms');
     return Array.isArray(r.rooms) ? r.rooms : [];
   }
   for (let i = 0; i < 2; i++) {
     try {
       const res = await fetch('/api/mp/rooms', { cache: 'no-store' });
-      const data = (await res.json()) as { ok?: boolean; rooms?: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }> };
+      const data = (await res.json()) as { ok?: boolean; rooms?: OpenRoomInfo[] };
       if (data?.ok && Array.isArray(data.rooms)) return data.rooms;
       return [];
     } catch {
@@ -209,7 +209,7 @@ export function mpOnView(cb: (view: MpRoomView) => void): () => void {
 }
 
 /** список открытых комнат (сервер рассылает лобби каждые ~3с) */
-export function mpOnRooms(cb: (rooms: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>) => void): () => void {
+export function mpOnRooms(cb: (rooms: OpenRoomInfo[]) => void): () => void {
   return getWs().onRooms(cb);
 }
 

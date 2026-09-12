@@ -94,6 +94,7 @@ const DICT: Record<string, [string, string]> = {
   mp_cancel: ['Отменить и выйти', 'Cancel and leave'],
   mp_room_public: ['открытая · видна в поиске', 'open · listed in search'],
   mp_room_private: ['приватная · только по коду', 'private · code only'],
+  mp_room_quick: ['быстрый матч', 'quick match'],
   mp_mode: ['онлайн-дуэль', 'online duel'],
   mp_online: ['на связи', 'connected'],
   mp_offline: ['нет связи', 'offline'],

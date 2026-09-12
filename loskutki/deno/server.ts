@@ -1635,12 +1635,12 @@ export async function roomControlA(
 
 /** Список ОТКРЫТЫХ комнат (только живые: хост был активен < 20с назад).
  *  Лобби — «косметика»: читаем из реплики KV (быстро и дёшево). */
-export async function listRoomsA(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>> {
+export async function listRoomsA(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>> {
   const now = Date.now();
-  const out: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }> = [];
+  const out: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }> = [];
   for (const { room: r } of await allRooms(false)) {
     if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null && now - r.host.lastPoll <= LIST_ALIVE_MS) {
-      out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, createdAt: r.createdAt });
+      out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, createdAt: r.createdAt, quick: r.quickHost === true });
     }
   }
   out.sort((a, b) => b.createdAt - a.createdAt);
@@ -1926,7 +1926,7 @@ function broadcastRoom(room: MpRoom): void {
 
 /** разослать список открытых комнат сокетам лобби (не в комнате) */
 async function pushRoomsA(): Promise<void> {
-  let list: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>;
+  let list: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>;
   try {
     list = await listRoomsA();
   } catch {

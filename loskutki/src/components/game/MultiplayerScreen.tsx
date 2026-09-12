@@ -44,6 +44,7 @@ import {
 import type { MpRoomView } from '@/lib/game/types';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
+import type { OpenRoomInfo } from '@/lib/ws';
 
 const POLL_MS = 1500;
 const LIST_MS = 5000;
@@ -52,12 +53,7 @@ const BACKOFF_MAX_MS = 6000;
 /** сколько «notfound» подряд терпим (сервер поднимает комнаты из снапшота) */
 const NOTFOUND_RETRIES = 3;
 
-interface OpenRoom {
-  code: string;
-  hostName: string;
-  hostAvatar: string;
-  createdAt: number;
-}
+type OpenRoom = OpenRoomInfo;
 
 export interface MultiplayerScreenProps {
   session: MpSession | null;
@@ -711,6 +707,12 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-[14.5px] font-extrabold text-foreground">{r.hostName}</span>
+                  {r.quick && (
+                    <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-[#8AA06F]/20 px-1.5 py-0.5 text-[9.5px] font-extrabold text-[#4e6437]">
+                      <Zap className="h-2.5 w-2.5" fill="#cfe0b4" />
+                      {t('mp_room_quick')}
+                    </span>
+                  )}
                   {mine && (
                     <span className="shrink-0 rounded-full bg-[#D9A13F]/20 px-2 py-0.5 text-[10px] font-extrabold text-[#8A5E13]">
                       {t('mp_your_room')}

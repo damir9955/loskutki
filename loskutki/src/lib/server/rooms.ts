@@ -692,8 +692,10 @@ export async function roomControl(
 
 /** Список ОТКРЫТЫХ комнат + чистка протухших.
  *  Показываем только живые: хост опрашивал комнату < 20с назад —
- *  «призраки» закрытых вкладок не попадают в поиск. */
-export async function listRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number }>> {
+ *  «призраки» закрытых вкладок не попадают в поиск.
+ *  Комнаты быстрого матча тоже публичные — помечаем quick: true,
+ *  чтобы лобби показывало «⚡ быстрый матч» рядом с обычными. */
+export async function listRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>> {
   const store = getRoomStore();
   try {
     const stale = await store.staleRooms(WAITING_HOST_TTL_MS, ROOM_TTL_MS);
@@ -713,7 +715,7 @@ export async function listRooms(): Promise<Array<{ code: string; hostName: strin
     .filter((w) => w.room.guest === null && w.room.host.leftAt === null && now - w.room.host.lastPoll <= LIST_ALIVE_MS)
     .sort((a, b) => b.room.createdAt - a.room.createdAt)
     .slice(0, 30)
-    .map((w) => ({ code: w.room.code, hostName: w.room.host.name, hostAvatar: w.room.host.avatar, createdAt: w.room.createdAt }));
+    .map((w) => ({ code: w.room.code, hostName: w.room.host.name, hostAvatar: w.room.host.avatar, createdAt: w.room.createdAt, quick: w.room.quickHost === true }));
 }
 
 // ===== быстрый матч (автопоиск) =====

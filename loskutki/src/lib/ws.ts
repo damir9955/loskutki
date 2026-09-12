@@ -26,6 +26,8 @@ export interface OpenRoomInfo {
   hostName: string;
   hostAvatar: string;
   createdAt: number;
+  /** комната быстрого матча (создана автопоиском) — лобби показывает ⚡ */
+  quick?: boolean;
 }
 
 interface PendingReq {

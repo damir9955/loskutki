@@ -229,7 +229,7 @@ export function MarketCard({
       {/* размер фигурки — слева сверху, компактная плашка (не перекрывает фигурку) */}
       <span
         className={`absolute top-0.5 left-0.5 rounded-md bg-[#7A5230]/14 px-[3px] py-[1px] leading-none font-extrabold text-[#7A5230] ${
-          big ? 'text-[12px]' : 'text-[9px]'
+          big ? 'text-[11px]' : 'text-[9px]'
         }`}
         title={t('m_size', { w: maxC, h: maxR })}
       >
@@ -257,19 +257,19 @@ export function MarketCard({
           </svg>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-[2.5px] self-center">
-          <CardPill icon={<CoinIcon size={tall ? (big ? 15 : 12) : big ? 13 : 10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} big={big} />
-          <CardPill icon={<ClockIcon size={tall ? (big ? 15 : 12) : big ? 13 : 10} />} value={patch.time} title={t('m_time', { n: patch.time })} big={big} />
+          <CardPill icon={<CoinIcon size={tall ? 12 : big ? 13 : 10} />} value={patch.cost} bad={!affordable} title={t('m_cost', { n: patch.cost })} big={big} />
+          <CardPill icon={<ClockIcon size={tall ? 12 : big ? 13 : 10} />} value={patch.time} title={t('m_time', { n: patch.time })} big={big} />
           {/* доход — ПОД временем: зелёный если есть, красный с нулём если нет;
               иконка — ПЛЮСИК, тот же значок дохода, что над полотном */}
           <span
             className={`flex items-center gap-0.5 rounded-full border-[1.5px] px-1 py-[1.5px] leading-none font-extrabold text-white shadow-md ${
-              big ? 'text-[12.5px]' : 'text-[10px]'
+              big ? 'text-[12px]' : 'text-[10px]'
             } ${
               patch.income > 0 ? 'border-[#1E6B36] bg-[#2F8F4E]' : 'border-[#7E2D1C] bg-[#B3432B]'
             }`}
             title={patch.income > 0 ? t('m_inc_yes', { n: patch.income }) : t('m_inc_no')}
           >
-            <IncomeIcon size={tall ? (big ? 15 : 12) : big ? 13 : 10} />
+            <IncomeIcon size={tall ? 12 : big ? 13 : 10} />
             {patch.income > 0 ? `+${patch.income}` : '0'}
           </span>
         </div>
@@ -288,7 +288,7 @@ export function MarketCard({
         ) : (
           <span
             className={`w-full truncate leading-none font-bold text-foreground/90 ${
-              tall ? (big ? 'text-[13px]' : 'text-[11px]') : big ? 'text-[12.5px]' : 'text-[10px]'
+              tall ? 'text-[11px]' : big ? 'text-[12.5px]' : 'text-[10px]'
             } ${
               name.length > 12 ? 'text-left' : 'text-center'
             }`}

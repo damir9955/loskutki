@@ -796,11 +796,16 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
     </SheetContent>
   );
 
-  /** карточка соперника (полная, горизонтальная) — телефон и большой
-   *  портрет (планшет вертикально): полной строкой ПОД ШАПКОЙ, «как на
-   *  телефоне». В ландшафте планшета вместо неё — opponentTabletNode. */
+  /** карточка соперника (полная, горизонтальная) — телефон и планшет-ландшафт
+   *  (в ландшафте живёт ВЕРХНЕЙ строкой колонки рынка — «в ряд с фигурами
+   *  выбора», а не болтается по левому краю информационной полосы) */
   const opponentNode = (
-        <div className="stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0">
+        <div
+          className={`stitched-card fabric-lattice flex items-center gap-1 px-1.5 py-0 ${
+            // планшет (ландшафт): строка в колонке рынка — тянется на её ширину
+            tablet ? 'w-full shrink-0 self-stretch' : ''
+          }`}
+        >
           <div className="flex shrink-0 items-center justify-center rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
             {foeAvatar ? (
               <Portrait src={foeAvatar} size={foeIconSize} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
@@ -809,15 +814,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div className={`truncate font-extrabold text-foreground ${bigPort ? 'text-[13.5px]' : 'text-[12px]'}`}>{foeName}</div>
-            <div className={`truncate font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'} ${bigPort ? 'text-[10px]' : 'text-[9px]'}`}>{foeSub}</div>
+            <div className="truncate text-[12px] font-extrabold text-foreground">{foeName}</div>
+            <div className={`truncate text-[9px] font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'}`}>{foeSub}</div>
           </div>
           <div className="flex items-center gap-0.5">
-            <EnemyTile big={bigPort} icon={<CoinIcon size={bigPort ? 16 : 14} />} value={bot.buttons} title={t('g_rival_buttons')} />
-            <EnemyTile big={bigPort} icon={<IncomeIcon size={bigPort ? 16 : 14} />} value={`+${bot.income}`} title={t('g_rival_income')} />
+            <EnemyTile icon={<CoinIcon size={14} />} value={bot.buttons} title={t('g_rival_buttons')} />
+            <EnemyTile icon={<IncomeIcon size={14} />} value={`+${bot.income}`} title={t('g_rival_income')} />
             <EnemyTile
-              big={bigPort}
-              icon={<ClockIcon size={bigPort ? 16 : 14} />}
+              icon={<ClockIcon size={14} />}
               value={
                 <>
                   {bot.time}
@@ -836,11 +840,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             <SheetTrigger asChild>
               <button
                 type="button"
-                className={`btn-cloth flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl ${bigPort ? 'h-9 w-9' : 'h-8 w-8'}`}
+                className="btn-cloth flex h-8 w-8 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl"
                 aria-label={t('g_view_rival')}
               >
-                <BoardFillIcon size={bigPort ? 19 : 17} covered={bot.covered} />
-                <span className={`font-extrabold leading-none text-foreground/80 ${bigPort ? 'text-[9.5px]' : 'text-[8.5px]'}`}>{bot.covered}</span>
+                <BoardFillIcon size={17} covered={bot.covered} />
+                <span className="text-[8.5px] font-extrabold leading-none text-foreground/80">{bot.covered}</span>
               </button>
             </SheetTrigger>
             {foeBoardSheet}
@@ -849,57 +853,48 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
   );
 
-  /** планшет-ЛАНДШАФТ: карточка соперника — ПРЯМОУГОЛЬНАЯ, стоит в полосе
-   *  «карты ходов» справа (ширина ТОЧНО совпадает с колонкой рынка снизу,
-   *  поэтому правая граница карточки привязана к правому краю игрового
-   *  поля), а дорожка слева растягивается до неё целиком — без пустоты.
-   *  Всё содержимое (аватар, имя, статус, показатели, кнопка полотна)
-   *  размещается внутри карточки без обрезки. */
-  const opponentTabletNode = (
-    <div className="stitched-card fabric-lattice flex w-[clamp(320px,38vw,560px)] shrink-0 flex-col justify-between gap-1.5 self-stretch overflow-hidden px-2.5 py-1.5">
-      <div className="flex min-w-0 items-center gap-2.5">
+  /** компактная ВЕРТИКАЛЬНАЯ карточка соперника — для bigPort: стоит четвёртой
+   *  В РЯД КАРТОЧЕК РЫНКА (просьба пользователя: «ячейка соперника — в ряд
+   *  с фигурами выбора, а не по левому краю») и освобождает целую строку
+   *  сверху — полотно становится крупнее */
+  const opponentMiniNode = (
+    <div className="stitched-card fabric-lattice flex h-full w-[clamp(150px,25vw,196px)] shrink-0 flex-col justify-between gap-0.5 px-1.5 py-1">
+      <div className="flex min-w-0 items-center gap-1.5">
         <div className="flex shrink-0 items-center justify-center rounded-xl border-2 border-[#A9855A]/60 bg-[#F4EAD2] p-[2px] shadow-[inset_0_1px_3px_rgba(122,82,48,.25)]">
           {foeAvatar ? (
-            <Portrait src={foeAvatar} size={foeIconSize} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
+            <Portrait src={foeAvatar} size={34} thinking={state.activePlayer === 1 && state.phase !== 'gameover'} alt={foeName} />
           ) : (
-            <BotAvatar level={state.botLevel} size={foeIconSize} thinking={busy && state.activePlayer === 1} />
+            <BotAvatar level={state.botLevel} size={34} thinking={busy && state.activePlayer === 1} />
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[16px] font-extrabold text-foreground">{foeName}</div>
-          <div className={`truncate text-[11.5px] font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'}`}>{foeSub}</div>
+          <div className="truncate text-[11.5px] font-extrabold text-foreground">{foeName}</div>
+          <div className={`truncate text-[9px] font-bold ${isOnline && online && online.opponent.connected && !online.opponent.left ? 'text-primary' : 'text-muted-foreground'}`}>{foeSub}</div>
         </div>
+      </div>
+      <div className="flex items-center justify-center gap-1">
+        <EnemyTile icon={<CoinIcon size={13} />} value={bot.buttons} title={t('g_rival_buttons')} />
+        <EnemyTile icon={<IncomeIcon size={13} />} value={`+${bot.income}`} title={t('g_rival_income')} />
+        <EnemyTile
+          icon={<ClockIcon size={13} />}
+          value={<>{bot.time}<span className="text-[8px] font-bold text-muted-foreground">/53</span></>}
+          title={t('g_rival_time', { t: bot.time })}
+        />
         {bot.tile7x7 && (
-          <div className="pop-in flex h-10 w-9 shrink-0 items-center justify-center text-[18px]" title={t('g_tile7x7')}>
+          <div className="pop-in flex h-8 w-7 items-center justify-center text-[13px]" title={t('g_tile7x7')}>
             🏅
           </div>
         )}
-      </div>
-      <div className="flex items-stretch justify-center gap-1.5">
-        <EnemyTile big icon={<CoinIcon size={17} />} value={bot.buttons} title={t('g_rival_buttons')} />
-        <EnemyTile big icon={<IncomeIcon size={17} />} value={`+${bot.income}`} title={t('g_rival_income')} />
-        <EnemyTile
-          big
-          icon={<ClockIcon size={17} />}
-          value={
-            <>
-              {bot.time}
-              <span className="text-[10px] font-bold text-muted-foreground">/53</span>
-            </>
-          }
-          title={t('g_rival_time', { t: bot.time })}
-        />
       </div>
       <Sheet open={showBotBoard} onOpenChange={setShowBotBoard}>
         <SheetTrigger asChild>
           <button
             type="button"
-            className="btn-cloth flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl"
+            className="btn-cloth flex h-9 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl"
             aria-label={t('g_view_rival')}
           >
-            <BoardFillIcon size={20} covered={bot.covered} />
-            <span className="text-[13.5px] font-extrabold leading-none text-foreground/80">{t('g_view_rival_short')}</span>
-            <span className="text-[13.5px] font-extrabold leading-none text-foreground">{bot.covered}</span>
+            <BoardFillIcon size={16} covered={bot.covered} />
+            <span className="text-[10.5px] font-extrabold leading-none text-foreground/80">{t('g_view_rival_short')}</span>
           </button>
         </SheetTrigger>
         {foeBoardSheet}
@@ -908,7 +903,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const trackNode = (
-        <div className={tablet ? 'flex min-w-0 flex-1 items-center' : 'mt-1'}>
+        <div className={tablet ? 'w-[min(44vw,420px)] shrink-0' : 'mt-1'}>
           <TimeTrack
             positions={[me.time, bot.time]}
             activePlayer={state.activePlayer}
@@ -923,19 +918,19 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   );
 
   const statsNode = (
-        <div className={tablet ? 'flex shrink-0 gap-1.5 [&>*]:min-w-0 [&>*]:flex-1' : `mt-1 flex items-center justify-center ${bigPort ? 'gap-2' : 'gap-1'}`}>
-          <BigStat icon={<CoinIcon size={big ? 21 : 17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} big={big} />
-          <BigStat icon={<IncomeIcon size={big ? 20 : 16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} big={big} />
-          <BigStat icon={<ClockIcon size={big ? 20 : 16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} big={big} />
+        <div className={tablet ? 'grid shrink-0 grid-cols-2 gap-1' : `mt-1 flex items-center justify-center ${bigPort ? 'gap-2' : 'gap-1'}`}>
+          <BigStat icon={<CoinIcon size={bigPort ? 21 : 17} />} value={me.buttons} label={t('g_buttons')} accent title={t('g_my_buttons')} big={bigPort} />
+          <BigStat icon={<IncomeIcon size={bigPort ? 20 : 16} />} value={`+${me.income}`} label={t('g_income')} title={t('g_my_income')} big={bigPort} />
+          <BigStat icon={<ClockIcon size={bigPort ? 20 : 16} />} value={me.time} label={t('g_of53')} title={t('g_my_time', { t: me.time })} big={bigPort} />
           <BigStat
-            icon={<BoardFillIcon size={big ? 20 : 16} covered={me.covered} />}
+            icon={<BoardFillIcon size={bigPort ? 20 : 16} covered={me.covered} />}
             value={me.covered}
             label={t('g_cells')}
             title={t('g_my_cells', { n: me.covered })}
-            big={big}
+            big={bigPort}
           />
           {me.tile7x7 && (
-            <div className={`pop-in flex items-center justify-center rounded-xl bg-[#D9A13F]/25 ${big ? 'h-auto text-[18px]' : 'h-[34px] w-8 text-[15px]'}`} title={t('g_tile7x7')}>
+            <div className={`pop-in flex items-center justify-center rounded-xl bg-[#D9A13F]/25 text-[15px] ${bigPort ? 'h-[42px] w-10 text-[18px]' : 'h-[34px] w-8'}`} title={t('g_tile7x7')}>
               🏅
             </div>
           )}
@@ -1080,7 +1075,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                   buttons={me.buttons}
                   placeable={check.placeable}
                   tall={tablet}
-                  big={big}
+                  big={bigPort}
                   selected={
                     hint && hint.action === 'buy' && hint.marketIndex === m.marketIndex
                       ? true
@@ -1091,6 +1086,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
                 />
               </div>
             ))}
+            {/* bigPort: ячейка соперника — ЧЕТВЁРТОЙ в ряд карточек рынка
+                (вместо отдельной строки сверху) — ряд заполняется целиком,
+                а полотно получает освободившуюся высоту */}
+            {!tablet && bigPort && <div className="flex shrink-0 self-stretch">{opponentMiniNode}</div>}
           </div>
           {/* Лента «дальше в пути»: все оставшиеся лоскутки круга, тап — карточка с данными */}
           <div className={tablet ? 'mt-1 shrink-0' : 'mt-1'}>
@@ -1112,27 +1111,27 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           type="button"
           onClick={doAdvance}
           disabled={!myTurn || busy || onlineBusy}
-          className={`btn-wood flex w-full items-center justify-between gap-2 rounded-xl px-3 ${
-            tablet ? 'h-16' : bigPort ? 'mt-1 h-14' : 'mt-1 h-12'
+          className={`btn-wood mt-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 ${
+            tablet ? 'h-16' : bigPort ? 'h-14' : 'h-12'
           } ${
             forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
           } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
           aria-label={t('g_advance_aria', { from: me.time, to: advanceTo, n: advPreview.buttonGain })}
         >
           <span className="flex min-w-0 items-center gap-1.5">
-            <ChevronsRight className={`shrink-0 ${big ? 'h-6 w-6' : 'h-5 w-5'}`} />
-            <span className={`shrink-0 font-extrabold ${big ? 'text-[16.5px]' : 'text-[14.5px]'}`}>{t('g_advance')}</span>
+            <ChevronsRight className={`shrink-0 ${bigPort ? 'h-6 w-6' : 'h-5 w-5'}`} />
+            <span className={`shrink-0 font-extrabold ${bigPort ? 'text-[16.5px]' : 'text-[14.5px]'}`}>{t('g_advance')}</span>
             {/* числа и значок времени — в заметной тёмной плашке, не сливаются с кнопкой */}
             <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#3F2A14]/35 px-2 py-1 shadow-[inset_0_1px_2px_rgba(0,0,0,.25)]">
-              <span className={`tabular-nums leading-none font-extrabold ${big ? 'text-[16px]' : 'text-[14px]'}`}>{me.time}</span>
-              <ArrowRight className={`shrink-0 ${big ? 'h-5 w-5' : 'h-4.5 w-4.5'}`} strokeWidth={3.4} />
-              <span className={`tabular-nums leading-none font-extrabold ${big ? 'text-[16px]' : 'text-[14px]'}`}>{advanceTo}</span>
-              <ClockIcon size={big ? 17 : 14} />
+              <span className={`tabular-nums leading-none font-extrabold ${bigPort ? 'text-[15.5px]' : 'text-[14px]'}`}>{me.time}</span>
+              <ArrowRight className={`shrink-0 ${bigPort ? 'h-5 w-5' : 'h-4.5 w-4.5'}`} strokeWidth={3.4} />
+              <span className={`tabular-nums leading-none font-extrabold ${bigPort ? 'text-[15.5px]' : 'text-[14px]'}`}>{advanceTo}</span>
+              <ClockIcon size={bigPort ? 16 : 14} />
             </span>
           </span>
-          <span className={`flex shrink-0 items-center gap-1 font-extrabold ${big ? 'text-[16.5px]' : 'text-[15px]'}`}>
+          <span className={`flex shrink-0 items-center gap-1 font-extrabold ${bigPort ? 'text-[16.5px]' : 'text-[15px]'}`}>
             <span className="tabular-nums">+{advPreview.buttonGain}</span>
-            <CoinIcon size={big ? 20 : 17} />
+            <CoinIcon size={bigPort ? 19 : 17} />
             {advPreview.leathers > 0 && (
               <span
                 className="ml-1 flex items-center gap-0.5 rounded-full bg-[#7A5230]/70 px-1.5 py-0.5"
@@ -1163,35 +1162,36 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
       {tablet ? (
         <div className="flex min-h-0 w-full flex-1 flex-col">
           {headerNode}
-          {/* Полоса «карта ходов + соперник»: ДОРОЖКА слева растягивается
-              ЦЕЛИКОМ до карточки соперника, а карточка — прямоугольная,
-              шириной ровно в колонку рынка снизу (правая граница совпадает
-              с правым краем игрового поля). Мои показатели и «Шагнуть
-              вперёд» переехали в колонку рынка. */}
-          <div className="mt-1 flex min-h-0 shrink-0 items-stretch gap-2 overflow-hidden">
+          {/* информационная полоса: дорожка + мои показатели + «Шагнуть вперёд».
+              Полоса заполняется ЦЕЛИКОМ по ширине (раньше справа от карточки
+              соперника оставалось ~350px пустоты — «пустое место на широком
+              экране»). Соперник переехал в колонку рынка. */}
+          <div className="mt-1 flex min-h-0 shrink-0 items-center gap-2 overflow-hidden">
             {trackNode}
-            {opponentTabletNode}
+            {statsNode}
+            <div className="flex min-h-0 min-w-0 flex-1 items-center overflow-hidden pl-1">
+              {advanceNode}
+            </div>
           </div>
           {/* главная зона: полотно занимает максимум места; справа — колонка
-              рынка: СВЕРХУ мои показатели (значки дохода, пуговицы и т.д.),
-              под ними фигуры выбора (крупнее), В САМОМ НИЗУ — «Шагнуть
-              вперёд». Колонка ТЕКУЧАЯ (38% ширины, 320–560px) — крупнеет
-              вместе с экраном. */}
+              рынка с СОПЕРНИКОМ первой строкой («в ряд с фигурами выбора»,
+              а не по левому краю полосы) и крупными карточками.
+              Колонка ТЕКУЧАЯ (30% ширины, 300–440px): на широких планшетах
+              карточки и лента крупнеют вместе с экраном */}
           <div className="mt-1 flex min-h-0 flex-1 gap-2">
             {boardNode}
-            <aside className="flex w-[clamp(320px,38vw,560px)] shrink-0 flex-col gap-2 overflow-hidden pb-0.5">
-              {statsNode}
+            <aside className="flex w-[clamp(300px,30vw,440px)] shrink-0 flex-col gap-2 overflow-hidden pb-0.5">
+              {opponentNode}
               {marketNode}
-              {advanceNode}
             </aside>
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 w-full flex-col">
           {headerNode}
-          {/* телефон И большой портрет (планшет вертикально): соперник —
-              полной строкой сверху, «как на телефоне» */}
-          {opponentNode}
+          {/* телефон: соперник — полной строкой сверху; bigPort — соперник
+              уехал в ряд карточек рынка (см. opponentMiniNode) */}
+          {!bigPort && opponentNode}
           {trackNode}
           {statsNode}
           {boardNode}
@@ -1244,16 +1244,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
 
 
 /** Компактная вертикальная плитка показателя соперницы */
-function EnemyTile({ icon, value, title, big = false }: { icon: React.ReactNode; value: React.ReactNode; title: string; big?: boolean }) {
+function EnemyTile({ icon, value, title }: { icon: React.ReactNode; value: React.ReactNode; title: string }) {
   return (
     <div
-      className={`flex flex-col items-center gap-0.5 rounded-lg border border-border bg-card/85 px-1 py-0.5 ${
-        big ? 'min-w-[52px] px-1.5 py-1' : 'min-w-[30px]'
-      }`}
+      className="flex min-w-[30px] flex-col items-center gap-0.5 rounded-lg border border-border bg-card/85 px-1 py-0.5"
       title={title}
     >
-      <span className={`flex items-center justify-center ${big ? 'h-[17px]' : 'h-[15px]'}`}>{icon}</span>
-      <span className={`flex items-center font-extrabold leading-none text-foreground ${big ? 'h-[15px] text-[13.5px]' : 'h-[13px] text-[12px]'}`}>{value}</span>
+      <span className="flex h-[15px] items-center justify-center">{icon}</span>
+      <span className="flex h-[13px] items-center text-[12px] leading-none font-extrabold text-foreground">{value}</span>
     </div>
   );
 }
