@@ -21,6 +21,8 @@ export default function Page() {
   const [session, setSession] = useState<MpSession | null>(() => loadSession());
   const [mpOpen, setMpOpen] = useState(() => loadSession() !== null);
   const [mpPlaying, setMpPlaying] = useState(false);
+  /** «Быстрая игра» из главного меню: хаб открывается и сразу ищет пару */
+  const [autoQuick, setAutoQuick] = useState(false);
 
   // синхронизация настроек звука при загрузке
   useEffect(() => {
@@ -105,6 +107,8 @@ export default function Page() {
       ) : mpOpen || session ? (
         <MultiplayerScreen
           session={session}
+          autoQuick={autoQuick}
+          onAutoQuickDone={() => setAutoQuick(false)}
           onSessionChange={updateSession}
           onPlaying={(s) => {
             updateSession(s);
@@ -112,6 +116,7 @@ export default function Page() {
           }}
           onExitHome={() => {
             setMpOpen(false);
+            setAutoQuick(false);
           }}
         />
       ) : (
@@ -123,6 +128,11 @@ export default function Page() {
           onOnline={() => {
             sound.ensure();
             sound.tap();
+            setAutoQuick(false);
+            setMpOpen(true);
+          }}
+          onQuickOnline={() => {
+            setAutoQuick(true);
             setMpOpen(true);
           }}
         />

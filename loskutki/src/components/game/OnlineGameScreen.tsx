@@ -31,6 +31,7 @@ import { isLegalPlacement } from '@/lib/game/placement';
 import { BOARD_SIZE } from '@/lib/game/constants';
 import { t } from '@/lib/i18n';
 import { sound } from '@/lib/sound';
+import { useOnline } from '@/lib/useOnline';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
@@ -84,6 +85,7 @@ export interface OnlineGameScreenProps {
 }
 
 export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScreenProps) {
+  const isNetOnline = useOnline();
   const { toast } = useToast();
   const [game, setGame] = useState<GameState | null>(null);
   const [gameSeq, setGameSeq] = useState(0);
@@ -480,7 +482,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
             </span>
-            <span className="text-[12.5px] font-extrabold text-white">{t('mp_net_lost')}</span>
+            <span className="text-[12.5px] font-extrabold text-white">{isNetOnline ? t('mp_net_lost') : t('mp_offline_d')}</span>
           </div>
         </div>
       )}

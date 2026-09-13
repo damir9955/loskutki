@@ -1,7 +1,17 @@
 'use client';
 
 import { useState, useSyncExternalStore } from 'react';
-import { BookOpen, BarChart3, Settings2, Play, CalendarDays, Sparkles, RotateCcw, Users } from 'lucide-react';
+import {
+  BookOpen,
+  BarChart3,
+  Settings2,
+  Play,
+  CalendarDays,
+  Sparkles,
+  RotateCcw,
+  Users,
+  Zap,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -26,6 +36,8 @@ import {
   type StatsStore,
 } from '@/lib/storage';
 import { dailyNumber } from '@/lib/game/rng';
+import { useOnline } from '@/lib/useOnline';
+import { APP_VERSION } from '@/lib/version';
 import {
   achDesc,
   achTitle,
@@ -106,47 +118,155 @@ function LogoMark({ size = 92 }: { size?: number }) {
   );
 }
 
-/** Декоративная полоска лоскутков */
-function FabricSwatchRow() {
-  return (
-    <div className="relative mt-5 flex items-end justify-center gap-1.5 overflow-hidden py-2" aria-hidden>
-      <Swatch id={21} w={3} rotate={-7} delay="0ms" />
-      <Swatch id={9} w={2} rotate={5} delay="70ms" />
-      <Swatch id={31} w={3} rotate={-3} delay="140ms" />
-      <Swatch id={24} w={2} rotate={7} delay="210ms" />
-      <Swatch id={32} w={2} rotate={-5} delay="280ms" />
-    </div>
-  );
-}
-
-function Swatch({ id, w, rotate, delay }: { id: number; w: number; rotate: number; delay: string }) {
-  const patch = PATCHES[id];
-  const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
-  const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
-  const dim = Math.max(maxR, maxC);
-  const px = w * 22;
-  return (
-    <svg
-      width={px}
-      height={px}
-      viewBox={`-0.15 -0.15 ${dim + 0.3} ${dim + 0.3}`}
-      style={{ transform: `rotate(${rotate}deg)`, animationDelay: delay }}
-      className="pop-in drop-shadow-[0_3px_4px_rgba(90,60,25,0.25)]"
-    >
-      <GlyphDirect patchId={id} />
-    </svg>
-  );
-}
-
 export interface HomeScreenProps {
   onStart: (level: BotLevel) => void;
   onDaily: () => void;
   onResume: (state: GameState) => void;
   onOpenRules: () => void;
   onOnline: () => void;
+  onQuickOnline: () => void;
 }
 
-export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }: HomeScreenProps) {
+/** Декоративная сцена-фон меню: тёплый свет сверху, «пушинки» в луче,
+ *  большое лоскутное полотно у нижней кромки (как будто стол со стёганым
+ *  одеялом). Всё pointer-events:none, только атмосфера. */
+function MenuScene() {
+  const lints = [
+    { left: '12%', top: '26%', dur: '13s', delay: '0s', size: 5 },
+    { left: '38%', top: '52%', dur: '17s', delay: '-4s', size: 4 },
+    { left: '64%', top: '18%', dur: '11s', delay: '-2s', size: 6 },
+    { left: '82%', top: '44%', dur: '15s', delay: '-7s', size: 4 },
+    { left: '26%', top: '70%', dur: '19s', delay: '-9s', size: 5 },
+    { left: '52%', top: '82%', dur: '12s', delay: '-5s', size: 3 },
+  ];
+  return (
+    <div className="menu-scene" aria-hidden>
+      <div className="menu-scene-light" />
+      {/* стёганое «одеяло» у нижней кромки */}
+      <div className="absolute inset-x-0 bottom-0 h-[240px]">
+        <BigBackdropPatch id={24} className="-left-14 bottom-[-70px] h-[190px] w-[190px]" rotate={-12} />
+        <BigBackdropPatch id={31} className="left-[16%] bottom-[-96px] h-[168px] w-[168px]" rotate={7} />
+        <BigBackdropPatch id={9} className="left-[42%] bottom-[-80px] h-[210px] w-[210px]" rotate={-6} />
+        <BigBackdropPatch id={21} className="left-[68%] bottom-[-104px] h-[176px] w-[176px]" rotate={11} />
+        <BigBackdropPatch id={32} className="-right-12 bottom-[-76px] h-[200px] w-[200px]" rotate={-9} />
+      </div>
+      {/* пушинки в луче света */}
+      {lints.map((l, i) => (
+        <span
+          key={i}
+          className="lint"
+          style={{
+            left: l.left,
+            top: l.top,
+            width: l.size,
+            height: l.size,
+            animationDuration: l.dur,
+            animationDelay: l.delay,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BigBackdropPatch({ id, className, rotate }: { id: number; className: string; rotate: number }) {
+  const patch = PATCHES[id];
+  const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
+  const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
+  const dim = Math.max(maxR, maxC);
+  return (
+    <svg
+      viewBox={`-0.3 -0.3 ${dim + 0.6} ${dim + 0.6}`}
+      preserveAspectRatio="xMidYMid meet"
+      className={`absolute ${className}`}
+      style={{ transform: `rotate(${rotate}deg)`, opacity: 0.16 }}
+    >
+      <GlyphDirect patchId={id} />
+    </svg>
+  );
+}
+
+/** Верёвка с мини-лоскутками на прищепках — качается от «сквозняка» */
+function Clothesline() {
+  return (
+    <svg viewBox="0 0 360 86" className="pointer-events-none absolute -top-6 left-1/2 h-[86px] w-[360px] max-w-full -translate-x-1/2" aria-hidden>
+      {/* верёвка */}
+      <path
+        d="M0 14 C 90 30, 270 30, 360 14"
+        fill="none"
+        stroke="#B99B6B"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        opacity="0.8"
+      />
+      <HangingPatch id={12} x={62} y={21} dur="4.6s" delay="-0.8s" w={30} />
+      <HangingPatch id={5} x={175} y={27} dur="5.3s" delay="-2.1s" w={34} />
+      <HangingPatch id={27} x={288} y={21} dur="4.9s" delay="-1.4s" w={28} />
+    </svg>
+  );
+}
+
+function HangingPatch({
+  id,
+  x,
+  y,
+  dur,
+  delay,
+  w,
+}: {
+  id: number;
+  x: number;
+  y: number;
+  dur: string;
+  delay: string;
+  w: number;
+}) {
+  const patch = PATCHES[id];
+  const maxR = Math.max(...patch.cells.map((c) => c[0])) + 1;
+  const maxC = Math.max(...patch.cells.map((c) => c[1])) + 1;
+  const dim = Math.max(maxR, maxC);
+  const h = Math.round((w * (maxR + 0.4)) / dim);
+  return (
+    <g className="sway" style={{ transformOrigin: `${x}px ${y}px`, animationDuration: dur, animationDelay: delay }}>
+      {/* прищепка */}
+      <rect x={x - 4} y={y - 9} width={8} height={13} rx={1.5} fill="#C8915B" stroke="#8A5E2F" strokeWidth={1.4} />
+      {/* лоскуток */}
+      <svg x={x - w / 2} y={y + 3} width={w} height={h} viewBox={`-0.3 -0.3 ${dim + 0.6} ${dim + 0.6}`} style={{ overflow: 'visible' }}>
+        <GlyphDirect patchId={id} />
+      </svg>
+    </g>
+  );
+}
+
+/** Бегущая стёжка под заголовком — «иголка шьёт прямо сейчас» */
+function NeedleLine() {
+  return (
+    <svg viewBox="0 0 220 18" className="mt-1.5 h-[18px] w-[220px] max-w-[60vw]" aria-hidden>
+      <path
+        d="M6 9 C 60 4, 160 14, 214 8"
+        fill="none"
+        stroke="#C0603A"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        className="needle-run"
+      />
+      {/* иголка на конце стёжки */}
+      <g>
+        <rect x={210} y={5.4} width={4.4} height={7.2} rx={1} fill="#B9BCC1" stroke="#7E8288" strokeWidth={0.8} />
+        <rect x={212.4} y={7.2} width={1.6} height={3.6} rx={0.8} fill="#5B6167" />
+      </g>
+    </svg>
+  );
+}
+
+export function HomeScreen({
+  onStart,
+  onDaily,
+  onResume,
+  onOpenRules,
+  onOnline,
+  onQuickOnline,
+}: HomeScreenProps) {
   const { toast } = useToast();
   const lang = useLang();
   // заголовок вкладки — на языке интерфейса («Лоскутки» / «Patchwork»)
@@ -156,27 +276,36 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const store = useSyncExternalStore(subscribeStore, getStoreSnapshot, getStoreServerSnapshot);
+  const online = useOnline();
 
   const s = store.stats;
   const daily = store.daily[todayKey()];
   const resumeGame = store.currentGame ?? null;
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-10 md:max-w-[880px] md:px-8">
-      {/* Логотип */}
-      <div className="pop-in relative">
-        <LogoMark size={104} />
+    <div className="relative mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-10 md:max-w-[880px] md:px-8">
+      {/* живая сцена-фон */}
+      <MenuScene />
+
+      {/* шапка: верёвка + логотип + заголовок */}
+      <div className="relative z-10 flex w-full flex-col items-center">
+        <Clothesline />
+        <div className="logo-float pop-in relative">
+          <LogoMark size={108} />
+        </div>
+        <h1
+          className="font-display title-stitch mt-2 text-[46px] leading-none text-foreground"
+          style={{ letterSpacing: '0.04em' }}
+        >
+          {t('app_title')}
+        </h1>
+        <NeedleLine />
+        <p className="mt-1 text-[15px] font-bold tracking-wide text-muted-foreground">
+          {t('app_subtitle')}
+        </p>
       </div>
-      <h1 className="font-display mt-2 text-[46px] leading-none text-foreground" style={{ letterSpacing: '0.04em' }}>
-        {t('app_title')}
-      </h1>
-      <p className="mt-1.5 text-[15px] font-bold tracking-wide text-muted-foreground">
-        {t('app_subtitle')}
-      </p>
 
-      <FabricSwatchRow />
-
-      <div className="stitch-divider my-4 w-full max-w-[300px]" />
+      <div className="stitch-divider my-4 mt-5 w-full max-w-[300px]" />
 
       {/* Продолжить партию */}
       {resumeGame && resumeGame.phase !== 'gameover' && (
@@ -187,7 +316,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
             sound.tap();
             onResume(resumeGame);
           }}
-          className="stitched-card mb-3 flex w-full items-center gap-3 p-3 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
+          className="patch-tilt-l2 stitched-card mb-3 flex w-full items-center gap-3 p-3 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
         >
           <div className="w-[54px] shrink-0">
             <MiniQuilt board={resumeGame.players[0].board} className="w-full rounded-md border border-border" />
@@ -202,11 +331,11 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
         </button>
       )}
 
-      {/* Основные кнопки: на планшете — три в ряд */}
-      <div className="w-full space-y-3 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
+      {/* Основные кнопки: на планшете — карточки в ряд */}
+      <div className="relative z-10 w-full space-y-3 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
         <Button
           size="lg"
-          className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold md:h-auto md:min-h-[78px] md:text-[18px]"
+          className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold md:col-span-3 md:h-auto md:min-h-[78px] md:text-[18px]"
           onClick={() => {
             sound.ensure();
             sound.tap();
@@ -217,11 +346,57 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
           {t('home_play')}
         </Button>
 
+        {/* Быстрая игра — сетевой режим с автопоиском соперника */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!online) {
+              toast({ title: t('mp_offline_t'), description: t('mp_offline_d') });
+              return;
+            }
+            sound.ensure();
+            sound.tap();
+            onQuickOnline();
+          }}
+          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+            online
+              ? 'border-[#8AA06F]/60 bg-[#8AA06F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(70,100,40,.45)]'
+              : 'border-border bg-muted/60 opacity-80'
+          }`}
+        >
+          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
+            <Zap className="h-6 w-6 text-[#4e6437]" fill="#cfe0b4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[16px] font-extrabold text-foreground">
+              {t('home_quick')}
+              {online ? (
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="dot-online" />
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-extrabold text-muted-foreground">
+                  {t('home_quick_off')}
+                </span>
+              )}
+            </div>
+            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('home_quick_h')}</div>
+          </div>
+        </button>
+
         {/* С другом — онлайн по коду или через открытую комнату */}
         <button
           type="button"
-          onClick={onOnline}
-          className="flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+          onClick={() => {
+            if (!online) {
+              toast({ title: t('mp_offline_t'), description: t('mp_offline_d') });
+              return;
+            }
+            sound.ensure();
+            sound.tap();
+            onOnline();
+          }}
+          className="patch-tilt-l flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
         >
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
             <Users className="h-6 w-6 text-[#3D5A77]" />
@@ -249,7 +424,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
             }
             onDaily();
           }}
-          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+          className={`patch-tilt-r2 flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
             daily
               ? 'border-border bg-muted/60 opacity-80'
               : 'border-[#D9A13F]/60 bg-[#D9A13F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(120,80,20,.45)]'
@@ -276,8 +451,8 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
       </div>
 
       {/* Нижний ряд */}
-      <div className="mt-4 grid w-full grid-cols-3 gap-2.5">
-        <MenuTile icon={<BookOpen className="h-6 w-6" />} label={t('home_rules')} onClick={onOpenRules} />
+      <div className="relative z-10 mt-4 grid w-full grid-cols-3 gap-2.5">
+        <MenuTile icon={<BookOpen className="h-6 w-6" />} label={t('home_rules')} onClick={onOpenRules} tilt="l" />
         <MenuTile
           icon={<BarChart3 className="h-6 w-6" />}
           label={t('home_stats')}
@@ -286,6 +461,7 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
             sound.tap();
             setStatsOpen(true);
           }}
+          tilt="r"
         />
         <MenuTile
           icon={<Settings2 className="h-6 w-6" />}
@@ -294,10 +470,16 @@ export function HomeScreen({ onStart, onDaily, onResume, onOpenRules, onOnline }
             sound.tap();
             setSettingsOpen(true);
           }}
+          tilt="l2"
         />
       </div>
 
       <div className="flex-1" />
+
+      {/* версия сборки — всегда видно, свежая ли у вас */}
+      <div className="relative z-10 mt-4 flex items-center gap-1.5 text-[10.5px] font-extrabold tracking-wide text-muted-foreground/80">
+        v{APP_VERSION} · {t('home_ver')}
+      </div>
 
       {/* ===== Выбор соперника ===== */}
       <Dialog open={pickOpen} onOpenChange={setPickOpen}>
@@ -366,17 +548,20 @@ function MenuTile({
   label,
   onClick,
   badge,
+  tilt,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   badge?: string;
+  tilt?: 'l' | 'r' | 'l2' | 'r2';
 }) {
+  const tiltCls = tilt === 'l' ? ' patch-tilt-l' : tilt === 'r' ? ' patch-tilt-r' : tilt === 'l2' ? ' patch-tilt-l2' : tilt === 'r2' ? ' patch-tilt-r2' : '';
   return (
     <button
       type="button"
       onClick={onClick}
-      className="stitched-card flex flex-col items-center gap-1.5 px-2 py-4 transition-transform hover:-translate-y-0.5 active:translate-y-0"
+      className={`stitched-card${tiltCls} flex flex-col items-center gap-1.5 px-2 py-4 transition-transform hover:-translate-y-0.5 active:translate-y-0`}
     >
       <div className="relative text-primary">
         {icon}

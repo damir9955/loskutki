@@ -48,10 +48,12 @@ const WATCHDOG_PING_MS = 10_000; // молчание сервера → шлём
 const WATCHDOG_KILL_MS = 25_000; // совсем глухое молчание → пересоздать сокет
 const IDLE_CLOSE_MS = 60_000; // нет подписок и запросов → закрыть сокет
 
-/** адрес WS-сервера (пусто — WS-режим выключен, работаем через API-роуты) */
+/** адрес WS-сервера. Пусто — WS-режим выключен (HTTP-роуты).
+ *  Значение по умолчанию вшито в next.config (Deno Deploy),
+ *  env NEXT_PUBLIC_WS_URL его перекрывает; «off»/«none» — выключить. */
 export function wsUrl(): string {
   const raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
-  if (!raw) return '';
+  if (!raw || /^(off|none|disabled)$/i.test(raw)) return '';
   let u = raw.replace(/\/+$/, '');
   if (/^wss:\/\//i.test(u) || /^ws:\/\//i.test(u)) return u;
   if (/^https:\/\//i.test(u)) return 'wss://' + u.slice(8);

@@ -64,7 +64,15 @@ export function loadProfile(): MpProfile {
   } catch {
     /* ignore */
   }
-  return { name: '', avatar: 'ann' };
+  // первого профиля нет — сразу создаём с именем по умолчанию:
+  // «Быстрая игра» из меню стартует поиск без лишних экранов
+  const def: MpProfile = { name: `Игрок ${Math.floor(1000 + Math.random() * 9000)}`, avatar: 'ann' };
+  try {
+    localStorage.setItem(PKEY, JSON.stringify(def));
+  } catch {
+    /* ignore */
+  }
+  return def;
 }
 
 export function saveProfile(p: MpProfile) {

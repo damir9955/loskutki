@@ -292,6 +292,105 @@
   border-top: 3px dashed rgba(139, 94, 60, 0.4);
 }
 
+/* ===== Главное меню: живая сцена ===== */
+
+/* мгновенный старт: маркер загрузки есть — вуаль спрятана до гидрации */
+html[data-boot='ready'] .boot-veil {
+  display: none !important;
+}
+
+/* мягкий свет сцены поверх льна */
+.menu-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.menu-scene-light {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 246, 220, 0.55) 0%, rgba(255, 246, 220, 0) 55%),
+    radial-gradient(90% 55% at 50% 115%, rgba(120, 86, 48, 0.16) 0%, rgba(120, 86, 48, 0) 60%);
+}
+
+/* «пушинки» — тканевая пыль в луче света */
+.lint {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(255, 250, 235, 0.85);
+  filter: blur(1px);
+  animation: lint-drift linear infinite;
+  opacity: 0;
+}
+@keyframes lint-drift {
+  0% { transform: translate3d(0, 12vh, 0) scale(0.7); opacity: 0; }
+  12% { opacity: 0.75; }
+  85% { opacity: 0.4; }
+  100% { transform: translate3d(26px, -105vh, 0) scale(1.15); opacity: 0; }
+}
+
+/* логотип дышит — «нашивка на подушке» */
+.logo-float {
+  animation: logo-float 6s ease-in-out infinite;
+  filter: drop-shadow(0 8px 14px rgba(90, 60, 25, 0.35));
+}
+@keyframes logo-float {
+  0%, 100% { transform: translateY(0) rotate(-0.4deg); }
+  50% { transform: translateY(-6px) rotate(0.4deg); }
+}
+
+/* прищепки-качели на верёвке */
+.sway {
+  transform-origin: 50% -6px;
+  animation: sway 5.2s ease-in-out infinite;
+}
+@keyframes sway {
+  0%, 100% { transform: rotate(-2.4deg); }
+  50% { transform: rotate(2.4deg); }
+}
+
+/* стёжка-заголовок с объёмом */
+.title-stitch {
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.6),
+    0 -1px 0 rgba(139, 94, 60, 0.4),
+    2px 3px 8px rgba(80, 55, 30, 0.22);
+}
+
+/* иголка «прошивает» пунктир под заголовком (бегущая стёжка) */
+.needle-run {
+  stroke-dasharray: 7 6;
+  animation: needle-run 9s linear infinite;
+}
+@keyframes needle-run {
+  to { stroke-dashoffset: -312; }
+}
+
+/* карточки-лоскутки слегка повёрнуты, как пришитые на живую руку */
+.patch-tilt-l { transform: rotate(-1.1deg); }
+.patch-tilt-r { transform: rotate(0.9deg); }
+.patch-tilt-l2 { transform: rotate(-0.6deg); }
+.patch-tilt-r2 { transform: rotate(0.5deg); }
+
+/* индикатор «онлайн» — тёплая пульсирующая точка */
+.dot-online {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: #4e9440;
+  box-shadow: 0 0 0 0 rgba(78, 148, 64, 0.5);
+  animation: dot-online 1.8s ease-out infinite;
+}
+@keyframes dot-online {
+  70% { box-shadow: 0 0 0 7px rgba(78, 148, 64, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(78, 148, 64, 0); }
+}
+
 /* тканевая решётка-ромбы для панелей (зона соперника и т.п.) */
 .fabric-lattice {
   background-image:
@@ -301,4 +400,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .track-popup, .pop-in, .piece-drop, .banner-in, .banner-glow, .confetti-piece { animation-duration: 0.01s !important; }
+  .lint, .logo-float, .sway, .needle-run, .dot-online { animation: none !important; }
 }

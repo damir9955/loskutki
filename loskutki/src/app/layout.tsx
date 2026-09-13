@@ -2,6 +2,13 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { FabricDefs } from "@/components/game/FabricDefs";
+import { BootGate } from "@/components/game/BootGate";
+
+/** До-гидрационный скрипт: если маркер «игра полностью скачана» есть,
+ *  ставим html[data-boot=ready] — CSS мгновенно прячет вуаль загрузки,
+ *  и повторный запуск открывается сразу, без единого мигания.
+ *  Идентификатор маркера синхронизирован с src/lib/version.ts. */
+const BOOT_PRECHECK = `try{if(localStorage.getItem('loskutki.boot')){document.documentElement.setAttribute('data-boot','ready')}}catch(e){}`;
 
 export const metadata: Metadata = {
   title: "Лоскутки — пэчворк-дуэль",
@@ -46,9 +53,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: BOOT_PRECHECK }} />
+      </head>
       <body className="antialiased linen-bg min-h-screen">
         <FabricDefs />
-        {children}
+        <BootGate>{children}</BootGate>
         <Toaster />
       </body>
     </html>

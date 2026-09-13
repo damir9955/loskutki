@@ -45,6 +45,8 @@ import type { MpRoomView } from '@/lib/game/types';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 import type { OpenRoomInfo } from '@/lib/ws';
+import { useOnline } from '@/lib/useOnline';
+import { WifiOff } from 'lucide-react';
 
 const POLL_MS = 1500;
 const LIST_MS = 5000;
@@ -57,14 +59,25 @@ type OpenRoom = OpenRoomInfo;
 
 export interface MultiplayerScreenProps {
   session: MpSession | null;
+  /** «Быстрая игра» из главного меню: сразу запускать автопоиск */
+  autoQuick?: boolean;
+  onAutoQuickDone?: () => void;
   onSessionChange: (s: MpSession | null) => void;
   onPlaying: (s: MpSession) => void;
   onExitHome: () => void;
 }
 
-export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitHome }: MultiplayerScreenProps) {
+export function MultiplayerScreen({
+  session,
+  autoQuick,
+  onAutoQuickDone,
+  onSessionChange,
+  onPlaying,
+  onExitHome,
+}: MultiplayerScreenProps) {
   const { toast } = useToast();
   useDocumentTitle();
+  const online = useOnline();
   const [profile, setProfile] = useState(() => loadProfile());
   const [isPublic, setIsPublic] = useState(true);
   const [code, setCode] = useState('');
@@ -282,6 +295,16 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
     setSearchSec(0);
     setSearching(true);
   };
+
+  // «Быстрая игра» из главного меню: запускаем поиск сразу при открытии хаба
+  const autoQuickOnce = useRef(false);
+  useEffect(() => {
+    if (!autoQuick || autoQuickOnce.current) return;
+    autoQuickOnce.current = true;
+    onAutoQuickDone?.();
+    doQuick();
+  }, [autoQuick]);
+
 
   const doCreate = async () => {
     if (busy) return;
@@ -584,6 +607,19 @@ export function MultiplayerScreen({ session, onSessionChange, onPlaying, onExitH
         <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" style={{ animationDuration: '3s' }} />
         <span>{t('mp_rules_note')}</span>
       </div>
+
+      {/* нет интернета: онлайн-режим недоступен */}
+      {!online && !waiting && !searching && (
+        <div className="pop-in mt-3 flex items-center gap-3 rounded-2xl border-2 border-[#C33A2F]/45 bg-[#C33A2F]/8 p-3.5 shadow-[inset_0_2px_0_rgba(255,255,255,.5)]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#C33A2F]/15">
+            <WifiOff className="h-5 w-5 text-[#8f2a20]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-extrabold text-foreground">{t('mp_offline_t')}</div>
+            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_offline_d')}</div>
+          </div>
+        </div>
+      )}
 
       {/* Профиль */}
       <div className="stitched-card mt-3 p-3.5">

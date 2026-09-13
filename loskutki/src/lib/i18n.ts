@@ -52,6 +52,26 @@ const DICT: Record<string, [string, string]> = {
   // — общее —
   app_title: ['Лоскутки', 'Patchwork'],
   app_subtitle: ['пэчворк-дуэль на скорость иголки', 'a quilting duel at needle speed'],
+
+  // ===== загрузка / офлайн =====
+  boot_title: ['Скачиваем игру на устройство', 'Downloading the game to your device'],
+  boot_status: ['Загружено {n}%', 'Downloaded {n}%'],
+  boot_no_net_t: ['Нужен интернет', 'Internet required'],
+  boot_no_net_d: [
+    'Для первого запуска скачайте игру по интернету — дальше она работает и без него',
+    'Download the game once — after that it works offline too',
+  ],
+  boot_retry: ['Подключиться и повторить', 'Connect and retry'],
+  mp_offline_t: ['Нет интернета', 'No internet'],
+  mp_offline_d: [
+    'Подключитесь к интернету, чтобы играть онлайн',
+    'Connect to the internet to play online',
+  ],
+  mp_offline_wait: ['Ждём интернет…', 'Waiting for internet…'],
+  home_quick: ['Быстрая игра', 'Quick match'],
+  home_quick_h: ['онлайн · найдём соперника за секунды', 'online · an opponent in seconds'],
+  home_quick_off: ['нужен интернет', 'internet needed'],
+  home_ver: ['офлайн-версия', 'offline build'],
   duel_mode: ['пэчворк-дуэль', 'patchwork duel'],
   daily_mode: ['игра дня №{n}', 'daily game #{n}'],
   win: ['победа', 'win'],
