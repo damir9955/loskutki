@@ -253,6 +253,7 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
           avatar: view.foe?.avatar ?? 'ann',
           connected: view.foe?.connected ?? false,
           left: view.foe?.left ?? false,
+          uid: view.foe?.uid ?? null,
         },
         turnDeadline: view.turnDeadline,
         turnPaused: view.turnPaused,

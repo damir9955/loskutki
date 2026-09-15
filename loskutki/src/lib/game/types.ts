@@ -111,7 +111,7 @@ export interface MpRoomView {
   isPublic: boolean;
   mySeat: 0 | 1;
   me: { name: string; avatar: string; connected: boolean };
-  foe: { name: string; avatar: string; connected: boolean; left: boolean } | null;
+  foe: { name: string; avatar: string; connected: boolean; left: boolean; uid?: string | null } | null;
   wins: [number, number];
   rematchMe: boolean;
   rematchFoe: boolean;

@@ -37,6 +37,17 @@ export interface StatsStore {
   achievements: Record<string, number>;
   daily: Record<string, DailyRecord>;
   currentGame: GameState | null;
+  /** статистика онлайн-партий с друзьями (ключ — uid друга) */
+  friendStats: Record<string, FriendFoeStat>;
+}
+
+export interface FriendFoeStat {
+  name: string;
+  avatar: string;
+  games: number;
+  wins: number;
+  losses: number;
+  lastAt: number;
 }
 
 export const DEFAULT_STORE: StatsStore = {
@@ -60,6 +71,7 @@ export const DEFAULT_STORE: StatsStore = {
   achievements: {},
   daily: {},
   currentGame: null,
+  friendStats: {},
 };
 
 export function loadStore(): StatsStore {
@@ -78,6 +90,7 @@ export function loadStore(): StatsStore {
       achievements: parsed.achievements ?? {},
       daily: parsed.daily ?? {},
       currentGame: parsed.currentGame ?? null,
+      friendStats: parsed.friendStats ?? {},
     };
   } catch {
     return structuredCloneSafe(DEFAULT_STORE);
@@ -163,6 +176,8 @@ export interface GameSummary {
   finalButtons: number;
   mode: 'casual' | 'daily' | 'online';
   dailyKey?: string;
+  /** онлайн-партия с другом —uid/имя/аватар соперника для «С друзьями» */
+  foe?: { uid: string; name: string; avatar: string };
 }
 
 /** Записать результат партии, вернуть разблокированные достижения */
@@ -195,6 +210,19 @@ export function recordGame(store: StatsStore, summary: GameSummary): {
       won: summary.won,
       score: summary.score,
       botScore: 0,
+    };
+  }
+
+  // онлайн-партия с другом — личный счёт («те, кто в статистике»)
+  if (summary.mode === 'online' && summary.foe?.uid) {
+    const prev = next.friendStats[summary.foe.uid];
+    next.friendStats[summary.foe.uid] = {
+      name: summary.foe.name,
+      avatar: summary.foe.avatar,
+      games: (prev?.games ?? 0) + 1,
+      wins: (prev?.wins ?? 0) + (summary.won ? 1 : 0),
+      losses: (prev?.losses ?? 0) + (summary.won ? 0 : 1),
+      lastAt: Date.now(),
     };
   }
 

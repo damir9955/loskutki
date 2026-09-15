@@ -24,6 +24,7 @@ export async function POST(req: Request) {
       playerId: body?.playerId,
       name: body?.name,
       avatar: body?.avatar,
+      uid: body?.uid,
     });
     return NextResponse.json({ ok: true, ...res });
   } catch (e) {

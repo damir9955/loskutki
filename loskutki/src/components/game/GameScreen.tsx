@@ -72,6 +72,8 @@ import type { NetAction } from '@/lib/game/types';
 import { useToast } from '@/hooks/use-toast';
 import { useIsBigPortrait, useIsTablet } from '@/hooks/use-is-tablet';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { useFriends, frAdd, frErrorKey } from '@/lib/friends';
+import { UserPlus } from 'lucide-react';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -97,7 +99,7 @@ export interface OnlineCtx {
   /** номер партии в комнате (растёт после каждого реванша) — защита
    * от повторной записи статистики при перезагрузке страницы финала */
   gameSeq: number;
-  opponent: { name: string; avatar: string; connected: boolean; left: boolean };
+  opponent: { name: string; avatar: string; connected: boolean; left: boolean; uid?: string | null };
   /** дедлайн хода по часам сервера (epoch ms) */
   turnDeadline: number | null;
   /** таймер приостановлен: владелец хода не на связи (телефон в кармане) */
@@ -360,6 +362,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           finalButtons: state.players[0].buttons,
           mode: state.mode,
           dailyKey: state.mode === 'daily' ? todayKey() : undefined,
+          // онлайн с известным uid соперника — личный счёт в «С друзьях»
+          foe:
+            state.mode === 'online' && online?.opponent?.uid
+              ? { uid: online.opponent.uid, name: online.opponent.name, avatar: online.opponent.avatar }
+              : undefined,
         };
         const { store: next, unlocked } = recordGame(store, summary);
         // офлайн-партию из localStorage убираем; онлайн живёт на сервере
@@ -791,6 +798,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-center text-[13px] font-semibold italic text-muted-foreground">
             «{quip}»
           </div>
+        )}
+        {/* добавить соперника в друзей — прямо из партии */}
+        {isOnline && online?.opponent?.uid && (
+          <FoeFriendButton uid={online.opponent.uid} foeName={foeName} />
         )}
       </div>
     </SheetContent>
@@ -1319,5 +1330,48 @@ function DragGlyph({ patchId }: { patchId: number }) {
         <GlyphDirect patchId={patchId} />
       </g>
     </svg>
+  );
+}
+
+/** Кнопка «в друзья» в шторке соперника (онлайн-партия): отправляет
+ *  заявку по постоянному ID противника; после отправки — «заявка
+ *  отправлена», с уже другом — не показывается */
+function FoeFriendButton({ uid, foeName }: { uid: string; foeName: string }) {
+  const { toast } = useToast();
+  const fr = useFriends();
+  const [busy, setBusy] = useState(false);
+  const isFriend = fr.friends.some((f) => f.uid === uid);
+  const sent = fr.outgoing.includes(uid);
+
+  if (isFriend) return null;
+
+  const onClick = async () => {
+    if (busy || sent) return;
+    setBusy(true);
+    sound.ensure();
+    sound.tap();
+    const res = await frAdd(uid);
+    setBusy(false);
+    if (res.ok) {
+      if (res.accepted) {
+        toast({ title: t('fr_now_friends'), description: t('fr_now_friends_d') });
+      } else {
+        toast({ title: t('fr_added_sent'), description: t('fr_sent_d') });
+      }
+    } else {
+      toast({ title: t(frErrorKey(res.error ?? '')) });
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={busy || sent}
+      onClick={() => void onClick()}
+      className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#8E5A79]/50 bg-[#8E5A79]/12 py-2.5 text-[13.5px] font-extrabold text-[#6E3B5E] transition-transform active:scale-[0.98]"
+    >
+      {sent ? <Check className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+      {sent ? t('fr_outgoing') : `${foeName} — ${t('fr_add_friend')}`}
+    </button>
   );
 }

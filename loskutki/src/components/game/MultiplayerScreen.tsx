@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Copy, Check, LogIn, Plus, RefreshCw, Users, Zap } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Heart, LogIn, Plus, RefreshCw, Users, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Portrait } from './MarketRow';
@@ -45,6 +45,8 @@ import type { MpRoomView } from '@/lib/game/types';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 import type { OpenRoomInfo } from '@/lib/ws';
+import { useFriends } from '@/lib/friends';
+import { FriendsDialog } from './FriendsDialog';
 import { useOnline } from '@/lib/useOnline';
 import { WifiOff } from 'lucide-react';
 
@@ -78,6 +80,8 @@ export function MultiplayerScreen({
   const { toast } = useToast();
   useDocumentTitle();
   const online = useOnline();
+  const fr = useFriends();
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const [profile, setProfile] = useState(() => loadProfile());
   const [isPublic, setIsPublic] = useState(true);
   const [code, setCode] = useState('');
@@ -226,6 +230,7 @@ export function MultiplayerScreen({
           playerId: quickIdRef.current ?? undefined,
           name,
           avatar: profile.avatar,
+          uid: profile.uid,
         });
         if (stop) return;
         quickIdRef.current = res.playerId;
@@ -333,7 +338,7 @@ export function MultiplayerScreen({
           onSessionChange(null);
         }
       }
-      const { code: roomCode, playerId } = await mpCreate({ name, avatar: profile.avatar, isPublic });
+      const { code: roomCode, playerId } = await mpCreate({ name, avatar: profile.avatar, isPublic, uid: profile.uid });
       const s: MpSession = { playerId, code: roomCode, name, avatar: profile.avatar, isPublic };
       onSessionChange(s);
       setWaiting(true);
@@ -364,6 +369,7 @@ export function MultiplayerScreen({
         name,
         avatar: profile.avatar,
         playerId: session?.playerId,
+        uid: profile.uid,
       });
       const s: MpSession = { playerId, code: roomCode, name, avatar: profile.avatar };
       onSessionChange(s);
@@ -405,6 +411,7 @@ export function MultiplayerScreen({
         name,
         avatar: profile.avatar,
         playerId: session?.playerId,
+        uid: profile.uid,
       });
       const s: MpSession = { playerId, code: joined, name, avatar: profile.avatar };
       onSessionChange(s);
@@ -600,7 +607,26 @@ export function MultiplayerScreen({
           <div className="font-display text-[21px] text-foreground">{t('mp_title')}</div>
           <div className="text-[11.5px] font-bold text-muted-foreground">{t('mp_desc')}</div>
         </div>
-        <div className="w-9" />
+        {/* Друзья: небольшая кнопка с индикацией событий */}
+        <button
+          type="button"
+          onClick={() => {
+            sound.ensure();
+            sound.tap();
+            setFriendsOpen(true);
+          }}
+          className={`btn-cloth relative flex h-9 w-9 items-center justify-center rounded-xl ${
+            online && fr.available ? '' : 'opacity-60'
+          }`}
+          aria-label={t('fr_title')}
+        >
+          <Heart className={`h-4.5 w-4.5 ${frBadgeCount(fr) > 0 ? 'text-[#C33A2F]' : 'text-[#A6721F]'}`} fill={frBadgeCount(fr) > 0 ? '#F3C1BA' : 'none'} />
+          {frBadgeCount(fr) > 0 && (
+            <span className="pop-in absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-card bg-[#C33A2F] px-0.5 text-[9px] font-extrabold text-white">
+              {frBadgeCount(fr) > 99 ? '99+' : frBadgeCount(fr)}
+            </span>
+          )}
+        </button>
       </div>
 
       <div className="mt-4 flex items-center gap-1.5 text-center text-[12px] font-bold text-muted-foreground">
@@ -769,6 +795,21 @@ export function MultiplayerScreen({
           );
         })}
       </div>
+
+      {/* ===== Друзья ===== */}
+      <FriendsDialog
+        open={friendsOpen}
+        onOpenChange={setFriendsOpen}
+        onJoinRoom={(j) => {
+          const s: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic };
+          onSessionChange(s);
+          setWaiting(true);
+        }}
+      />
     </div>
   );
+}
+
+function frBadgeCount(fr: { friends: Array<{ unread: number }>; requests: unknown[]; invites: unknown[] }): number {
+  return fr.friends.reduce((n, f) => n + f.unread, 0) + fr.requests.length + fr.invites.length;
 }

@@ -11,6 +11,7 @@ export async function POST(req: Request) {
       name: body?.name,
       avatar: body?.avatar,
       isPublic: body?.isPublic,
+      uid: body?.uid,
     });
     return NextResponse.json({ ok: true, code, playerId });
   } catch (e) {

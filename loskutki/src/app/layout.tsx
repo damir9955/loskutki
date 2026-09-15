@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { FabricDefs } from "@/components/game/FabricDefs";
-import { BootGate } from "@/components/game/BootGate";
 
 /** До-гидрационный скрипт: если маркер «игра полностью скачана» есть,
  *  ставим html[data-boot=ready] — CSS мгновенно прячет вуаль загрузки,
@@ -58,7 +57,10 @@ export default function RootLayout({
       </head>
       <body className="antialiased linen-bg min-h-screen">
         <FabricDefs />
-        <BootGate>{children}</BootGate>
+        {/* BootGate живёт внутри игровой страницы (src/app/page.tsx):
+          служебные страницы вроде /privacy открываются без экрана
+          загрузки — важно для ссылки на политику конфиденциальности */}
+        {children}
         <Toaster />
       </body>
     </html>

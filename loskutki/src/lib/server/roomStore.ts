@@ -18,6 +18,8 @@ export interface MpPlayer {
   avatar: string;
   lastPoll: number;
   leftAt: number | null;
+  /** постоянный ID игрока (код друга) — как в deno/server.ts */
+  uid?: string | null;
 }
 
 export interface MpRoom {

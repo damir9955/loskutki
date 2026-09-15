@@ -14,12 +14,16 @@
  *    html[data-boot=ready] ДО гидрации и вуаль скрывается CSS-ом.
  *  — маркер есть + вышла новая версия: service-воркер сам скачивает
  *    обновление в фоне (незаметно), применяется при следующем запуске.
+ *    ПОДСТРАХОВКА: при запуске сверяемся с /version.json на сервере
+ *    (всегда из сети); если там версия новее, а на устройстве — старая
+ *    (например, воркер не успел обновиться) — чистим кэш и перекачиваем
+ *    игру сразу, с полоской загрузки. Замок на 60с страхует от циклов.
  *  — нет интернета при первом запуске: экран «подключитесь к
  *    интернету» с кнопкой повторить.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { APP_VERSION, BOOT_MARKER_KEY } from '@/lib/version';
+import { APP_VERSION, BOOT_MARKER_KEY, UPDATE_LOCK_KEY } from '@/lib/version';
 import { t } from '@/lib/i18n';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
@@ -27,6 +31,7 @@ type BootState =
   | { kind: 'checking' }
   | { kind: 'ready' }
   | { kind: 'loading'; done: number; total: number }
+  | { kind: 'updating' }
   | { kind: 'error' };
 
 interface BootMarker {
@@ -77,6 +82,69 @@ async function fetchIntoCache(cache: Cache, url: string): Promise<boolean> {
     /* попробуем дальше */
   }
   return false;
+}
+
+/** сверка с сервером: там уже другая (новая) версия? — только онлайн,
+ *  быстро (≤ 3.5с) и молча; любая ошибка = «не знаем, работаем дальше» */
+async function serverHasNewerBuild(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.onLine) return false;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 3500);
+    try {
+      const resp = await fetch('/version.json', {
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: ctl.signal,
+      });
+      if (!resp.ok) return false;
+      const data = (await resp.json()) as { version?: string };
+      return typeof data.version === 'string' && data.version !== APP_VERSION;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/** недавно уже обновлялись этим механизмом? (страховка от цикла) */
+function updateLocked(): boolean {
+  try {
+    const at = Number(localStorage.getItem(UPDATE_LOCK_KEY));
+    return Number.isFinite(at) && Date.now() - at < 60_000;
+  } catch {
+    return false;
+  }
+}
+
+/** на устройстве устаревшая сборка: сносим все кэши и маркер, просим
+ *  воркер обновиться и перезапускаем страницу — игрок сразу получает
+ *  свежую версию (с окном загрузки, как при первой установке) */
+async function selfUpdate(setState: (s: BootState) => void): Promise<void> {
+  setState({ kind: 'updating' });
+  try {
+    localStorage.setItem(UPDATE_LOCK_KEY, String(Date.now()));
+  } catch {
+    /* приватный режим — просто продолжаем */
+  }
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  } catch {
+    /* Cache Storage недоступен — страница перезагрузится всё равно */
+  }
+  try {
+    localStorage.removeItem(BOOT_MARKER_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    void (await navigator.serviceWorker?.getRegistration())?.update();
+  } catch {
+    /* ignore */
+  }
+  location.reload();
 }
 
 export function BootGate({ children }: { children: React.ReactNode }) {
@@ -186,6 +254,12 @@ export function BootGate({ children }: { children: React.ReactNode }) {
       // setState — через микрозадачу (не синхронно в эффекте)
       void registerSw();
       queueMicrotask(() => setState({ kind: 'ready' }));
+      // ПОДСТРАХОВКА: воркер мог не успеть/не суметь обновиться —
+      // сверяем версию с сервером и при расхождении перекачиваемся
+      void (async () => {
+        if (updateLocked()) return;
+        if (await serverHasNewerBuild()) await selfUpdate(setState);
+      })();
       return;
     }
     queueMicrotask(() => void runFirstInstall());
@@ -224,6 +298,19 @@ export function BootGate({ children }: { children: React.ReactNode }) {
             <RefreshCw className="h-5 w-5" />
             {t('boot_retry')}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // updating: на устройстве была устаревшая версия — перекачиваем
+  if (state.kind === 'updating') {
+    return (
+      <div className="linen-bg fixed inset-0 z-50 flex min-h-svh flex-col items-center justify-center px-8">
+        <div className="pop-in stitched-card flex w-full max-w-[380px] flex-col items-center px-6 py-8 text-center">
+          <RefreshCw className="h-10 w-10 animate-spin text-[#8B5E3C]" aria-hidden />
+          <div className="font-display mt-4 text-[22px] text-foreground">{t('boot_update_t')}</div>
+          <p className="mt-2 text-[13.5px] font-semibold text-muted-foreground">{t('boot_update_d')}</p>
         </div>
       </div>
     );

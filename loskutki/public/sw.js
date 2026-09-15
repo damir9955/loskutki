@@ -16,10 +16,11 @@
  *  — навигация ('/'): кэш-первично (мгновенный старт, версия строго
  *    из своего кэша — смешивания старого/нового не бывает);
  *  — прочие GET-запросы своего origin: кэш-первично + докачка в кэш;
- *  — /api/* и сам sw.js — всегда сеть.
+ *  — /api/*, сам sw.js и /version.json — всегда сеть (version.json —
+ *    «честная» версия на сервере, по ней загрузчик узнаёт об обновлении).
  */
 
-const VERSION = 'v3.0.0';
+const VERSION = 'v3.2.0';
 const CACHE = 'loskutki-' + VERSION;
 
 /** файлы, о которых воркер знает без разбора HTML */
@@ -104,17 +105,20 @@ async function precacheAll(progressCb) {
   const cache = await caches.open(CACHE);
   const urls = new Set(STATIC_ASSETS);
 
-  // 1) страница: в кэш + разобрать на чанки/стили
+  // 1) страницы (игра + политика конфиденциальности): в кэш + разобрать
+  //    на чанки/стили
   let html = '';
-  try {
-    const resp = await fetch(new Request('/', { credentials: 'omit', cache: 'no-store' }));
-    if (resp && resp.ok) {
-      const clone = resp.clone();
-      await cache.put(new Request('/', { credentials: 'omit' }), resp);
-      html = await clone.text();
+  for (const page of ['/', '/privacy']) {
+    try {
+      const resp = await fetch(new Request(page, { credentials: 'omit', cache: 'no-store' }));
+      if (resp && resp.ok) {
+        const clone = resp.clone();
+        await cache.put(new Request(page, { credentials: 'omit' }), resp);
+        html += '\n' + await clone.text();
+      }
+    } catch (e) {
+      /* офлайн прямо при установке — загрузочный экран покажет ошибку */
     }
-  } catch (e) {
-    /* офлайн прямо при установке — загрузочный экран покажет ошибку */
   }
   for (const u of assetUrlsFromHtml(html)) urls.add(u);
 
@@ -210,6 +214,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // API — только сеть
   if (url.pathname === '/sw.js') return; // свой файл всегда мимо кэша
+  if (url.pathname === '/version.json') return; // версия сервера — всегда сеть
 
   event.respondWith(
     (async () => {

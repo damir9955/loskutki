@@ -13,7 +13,7 @@
  */
 
 import type { MpRoomView, NetAction } from './game/types';
-import { getWs, wsEnabled, type OpenRoomInfo } from './ws';
+import { getWs, wsEnabled, type OpenRoomInfo, type FrEvent } from './ws';
 
 export interface MpSession {
   playerId: string;
@@ -27,10 +27,42 @@ export interface MpSession {
 export interface MpProfile {
   name: string;
   avatar: string;
+  /** постоянный ID игрока (код друга вида K7QM2XF9) */
+  uid: string;
 }
 
 const SKEY = 'loskutki.mp.session.v1';
 const PKEY = 'loskutki.mp.profile.v1';
+
+/** алфавит кода друга (как коды комнат — без похожих знаков) */
+const UID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** сгенерировать постоянный ID игрока (8 знаков) */
+export function genUid(): string {
+  const buf = new Uint8Array(8);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(buf);
+  else for (let i = 0; i < 8; i++) buf[i] = Math.floor(Math.random() * 256);
+  let s = '';
+  for (let i = 0; i < 8; i++) s += UID_ALPHABET[buf[i] % UID_ALPHABET.length];
+  return s;
+}
+
+/** привести введённый ID друга к каноническому виду ('' — некорректен) */
+export function normalizeFriendCode(raw: string): string {
+  const s = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return /^[A-Z0-9]{8}$/.test(s) ? s : '';
+}
+
+/** красиво отформатировать код друга: K7QM-2XF9 */
+export function formatFriendCode(uid: string): string {
+  return uid.length === 8 ? `${uid.slice(0, 4)}-${uid.slice(4)}` : uid;
+}
+
+/** уведомление о сохранении профиля (имя/аватар) — пере-регистрация hello */
+let profileListener: ((p: MpProfile) => void) | null = null;
+export function setProfileListener(cb: ((p: MpProfile) => void) | null): void {
+  profileListener = cb;
+}
 
 export function loadSession(): MpSession | null {
   if (typeof window === 'undefined') return null;
@@ -54,19 +86,33 @@ export function saveSession(s: MpSession | null) {
 }
 
 export function loadProfile(): MpProfile {
-  if (typeof window === 'undefined') return { name: '', avatar: 'ann' };
+  if (typeof window === 'undefined') return { name: '', avatar: 'ann', uid: '' };
   try {
     const raw = localStorage.getItem(PKEY);
     if (raw) {
-      const p = JSON.parse(raw) as MpProfile;
-      if (typeof p?.name === 'string' && typeof p?.avatar === 'string') return p;
+      const p = JSON.parse(raw) as Partial<MpProfile>;
+      if (typeof p?.name === 'string' && typeof p?.avatar === 'string') {
+        // апгрейд старого профиля: постоянный ID для друзей (генерируем раз)
+        const uid = normalizeFriendCode(p.uid ?? '') || genUid();
+        const full: MpProfile = { name: p.name, avatar: p.avatar, uid };
+        if (uid !== p.uid) {
+          try {
+            localStorage.setItem(PKEY, JSON.stringify(full));
+          } catch { /* ignore */ }
+        }
+        return full;
+      }
     }
   } catch {
     /* ignore */
   }
   // первого профиля нет — сразу создаём с именем по умолчанию:
   // «Быстрая игра» из меню стартует поиск без лишних экранов
-  const def: MpProfile = { name: `Игрок ${Math.floor(1000 + Math.random() * 9000)}`, avatar: 'ann' };
+  const def: MpProfile = {
+    name: `Игрок ${Math.floor(1000 + Math.random() * 9000)}`,
+    avatar: 'ann',
+    uid: genUid(),
+  };
   try {
     localStorage.setItem(PKEY, JSON.stringify(def));
   } catch {
@@ -82,6 +128,9 @@ export function saveProfile(p: MpProfile) {
   } catch {
     /* ignore */
   }
+  try {
+    profileListener?.(p);
+  } catch { /* слушатель ошибся — не критично */ }
 }
 
 // ===== сетевые вызовы =====
@@ -133,7 +182,7 @@ async function postRetry<T>(url: string, body: unknown, attempts = 3): Promise<T
   }
 }
 
-export async function mpCreate(input: { name: string; avatar: string; isPublic: boolean }): Promise<{ code: string; playerId: string }> {
+export async function mpCreate(input: { name: string; avatar: string; isPublic: boolean; uid?: string }): Promise<{ code: string; playerId: string }> {
   if (wsEnabled()) {
     const r = await getWs().request<{ code: string; playerId: string }>('create', input);
     return { code: r.code, playerId: r.playerId };
@@ -141,7 +190,7 @@ export async function mpCreate(input: { name: string; avatar: string; isPublic: 
   return post<{ code: string; playerId: string }>('/api/mp/create', input);
 }
 
-export async function mpJoin(input: { code: string; name: string; avatar: string; playerId?: string }): Promise<{ code: string; playerId: string }> {
+export async function mpJoin(input: { code: string; name: string; avatar: string; playerId?: string; uid?: string }): Promise<{ code: string; playerId: string }> {
   if (wsEnabled()) {
     const r = await getWs().request<{ code: string; playerId: string }>('join', input);
     return { code: r.code, playerId: r.playerId };
@@ -175,7 +224,7 @@ export async function mpControl(input: { code: string; playerId: string; op: 'le
 }
 
 /** Быстрый матч (автопоиск): пару с другим искателем или первой открытой комнатой */
-export async function mpQuick(input: { playerId?: string; name: string; avatar: string }): Promise<{ status: 'matched' | 'waiting'; code?: string; playerId: string }> {
+export async function mpQuick(input: { playerId?: string; name: string; avatar: string; uid?: string }): Promise<{ status: 'matched' | 'waiting'; code?: string; playerId: string }> {
   if (wsEnabled()) {
     const r = await getWs().request<{ status: 'matched' | 'waiting'; code?: string; playerId: string }>('quick', input);
     return { status: r.status, code: r.code, playerId: r.playerId };
@@ -220,6 +269,14 @@ export function mpOnView(cb: (view: MpRoomView) => void): () => void {
 export function mpOnRooms(cb: (rooms: OpenRoomInfo[]) => void): () => void {
   return getWs().onRooms(cb);
 }
+
+/** события друзей: заявки, сообщения, приглашения (push) */
+export function mpOnFriends(cb: (m: Record<string, unknown>) => void): () => void {
+  return getWs().onFriends(cb);
+}
+
+/** тип события друзей (для типизации обработчика) */
+export type { FrEvent };
 
 /** статус соединения: false — связь потеряна, true — восстановлена */
 export function mpOnNet(cb: (connected: boolean) => void): () => void {

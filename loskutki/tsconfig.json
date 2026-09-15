@@ -50,6 +50,10 @@
     "scripts/join-idle.ts",
     "scripts/test-autopass-persist.ts",
     "scripts/probe-timeout.ts",
-    "scripts/test-quick-visible.ts"
+    "scripts/test-quick-visible.ts",
+    "scripts/test-friends.ts",
+    "scripts/test-quick-uid.ts",
+    "scripts/debug-view.ts",
+    "scripts/debug-fr-snap.ts"
   ]
 }

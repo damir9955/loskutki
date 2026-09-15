@@ -91,6 +91,12 @@ function cleanAvatar(raw: unknown): string {
   return (AVATAR_IDS as readonly string[]).includes(s) ? s : 'ann';
 }
 
+/** постоянный ID игрока (код друга) — как в deno/server.ts */
+function cleanUid(raw: unknown): string | null {
+  const s = typeof raw === 'string' ? raw.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+  return /^[A-Z0-9]{8}$/.test(s) ? s : null;
+}
+
 function seatOf(room: MpRoom, playerId: string): 0 | 1 | null {
   if (room.host.id === playerId) return 0;
   if (room.guest?.id === playerId) return 1;
@@ -236,8 +242,8 @@ async function mutateRoom(
 // ===== внутренняя (синхронная) логика комнат =====
 
 /** посадить гостя в ждущую комнату и стартовать партию */
-function seatGuest(room: MpRoom, pid: string, name: string, avatar: string): void {
-  room.guest = { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null };
+function seatGuest(room: MpRoom, pid: string, name: string, avatar: string, uid: string | null = null): void {
+  room.guest = { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null, uid };
   room.state = createGame({
     seed: (Math.floor(Math.random() * 1e9) ^ Date.now()) >>> 0,
     mode: 'online',
@@ -259,7 +265,7 @@ function seatGuest(room: MpRoom, pid: string, name: string, avatar: string): voi
 }
 
 /** внутренняя логика join (валидации + старт партии); возвращает id гостя */
-function joinInternal(room: MpRoom, input: { name: string; avatar: string; playerId?: unknown }): string {
+function joinInternal(room: MpRoom, input: { name: string; avatar: string; playerId?: unknown; uid?: string | null }): string {
   // хост не может «войти» в собственную комнату как гость — иначе партия
   // начнётся против самого себя и друзья уже не смогут присоединиться
   if (typeof input.playerId === 'string' && input.playerId === room.host.id) throw 'ownroom';
@@ -268,7 +274,7 @@ function joinInternal(room: MpRoom, input: { name: string; avatar: string; playe
   tick(room);
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
   const guestId = genId();
-  seatGuest(room, guestId, input.name, input.avatar);
+  seatGuest(room, guestId, input.name, input.avatar, cleanUid(input.uid));
   return guestId;
 }
 
@@ -540,6 +546,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
           avatar: foe.avatar,
           connected: now - foe.lastPoll < CONNECTED_MS,
           left: foe.leftAt !== null,
+          uid: foe.uid ?? null,
         }
       : null,
     wins: [room.wins[0], room.wins[1]],
@@ -563,7 +570,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
 // ===== публичный async-API (вызывается роутами) =====
 
 /** создать комнату (приватную по коду или открытую для поиска) */
-export async function createRoom(input: { name: unknown; avatar: unknown; isPublic: unknown }): Promise<{
+export async function createRoom(input: { name: unknown; avatar: unknown; isPublic: unknown; uid?: unknown }): Promise<{
   code: string;
   playerId: string;
 }> {
@@ -571,7 +578,11 @@ export async function createRoom(input: { name: unknown; avatar: unknown; isPubl
   if (name.length < 1) throw 'badname';
   const store = getRoomStore();
   for (let i = 0; i < 6; i++) {
-    const room = newRoom(genCode(), { id: genId(), name, avatar: cleanAvatar(input.avatar), lastPoll: Date.now(), leftAt: null }, input.isPublic === true);
+    const room = newRoom(
+      genCode(),
+      { id: genId(), name, avatar: cleanAvatar(input.avatar), lastPoll: Date.now(), leftAt: null, uid: cleanUid(input.uid) },
+      input.isPublic === true,
+    );
     let inserted = false;
     try {
       inserted = await store.insert(room);
@@ -585,7 +596,7 @@ export async function createRoom(input: { name: unknown; avatar: unknown; isPubl
 }
 
 /** войти в комнату по коду (партия стартуется сразу) */
-export async function joinRoom(input: { code: unknown; name: unknown; avatar: unknown; playerId?: unknown }): Promise<{
+export async function joinRoom(input: { code: unknown; name: unknown; avatar: unknown; playerId?: unknown; uid?: unknown }): Promise<{
   code: string;
   playerId: string;
 }> {
@@ -595,7 +606,7 @@ export async function joinRoom(input: { code: unknown; name: unknown; avatar: un
   if (!/^[A-Z2-9]{6}$/.test(code)) throw 'notfound';
   let guestId = '';
   const res = await mutateRoom(code, (room) => {
-    guestId = joinInternal(room, { name, avatar: cleanAvatar(input.avatar), playerId: input.playerId });
+    guestId = joinInternal(room, { name, avatar: cleanAvatar(input.avatar), playerId: input.playerId, uid: cleanUid(input.uid) });
   });
   if (!res.room && !res.deleted) throw 'notfound';
   if (res.deleted || !guestId) throw 'gone';
@@ -762,7 +773,7 @@ async function removeMyWaitingRoom(store: RoomStore, mine: LoadedRoom): Promise<
  * Гостевое место занимается CAS-записью: двое одновременно входящих —
  * войдёт только один, второй получит следующую комнату.
  */
-export async function quickMatch(input: { playerId?: unknown; name: unknown; avatar: unknown }): Promise<{
+export async function quickMatch(input: { playerId?: unknown; name: unknown; avatar: unknown; uid?: unknown }): Promise<{
   status: 'matched' | 'waiting';
   code?: string;
   playerId: string;
@@ -811,7 +822,7 @@ export async function quickMatch(input: { playerId?: unknown; name: unknown; ava
           return; // место уже занято/комната не ждёт — пробуем следующую
         }
         claimed = true;
-        seatGuest(room, pid, name, avatar);
+        seatGuest(room, pid, name, avatar, cleanUid(input.uid));
       });
     } catch {
       continue; // конфликт/сеть — пробуем следующего кандидата
@@ -825,7 +836,7 @@ export async function quickMatch(input: { playerId?: unknown; name: unknown; ava
   // 3) никого — создаю свою публичную ждущую комнату автопоиска
   if (!mine) {
     for (let i = 0; i < 3; i++) {
-      const room = newRoom(genCode(), { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null }, true, true);
+      const room = newRoom(genCode(), { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null, uid: cleanUid(input.uid) }, true, true);
       let inserted = false;
       try {
         inserted = await store.insert(room);

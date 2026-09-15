@@ -34,10 +34,13 @@
  *
  * Протокол (JSON по WebSocket):
  *   клиент → сервер: {ref, t:'create'|'join'|'state'|'move'|'control'|
- *     'quick'|'quick_cancel'|'rooms'|'ping', ...} и {t:'pong', id}
+ *     'quick'|'quick_cancel'|'rooms'|'ping'|'hello'|'fr_sync'|'fr_add'|
+ *     'fr_accept'|'fr_decline'|'fr_remove'|'fr_msg'|'fr_read'|'fr_chat'|
+ *     'fr_invite'|'fr_invite_accept'|'fr_invite_decline', ...} и {t:'pong', id}
  *   сервер → клиент: {ref, ok:true|false, ...} — ответ на запрос,
  *     {t:'view', view} — мгновенный push состояния комнаты,
  *     {t:'rooms', rooms} — push списка открытых комнат лобби,
+ *     {t:'fr_*', ...} — события друзей (заявка/сообщение/приглашение),
  *     {t:'ping', id} — проверка связи.
  */
 
@@ -281,7 +284,7 @@ interface MpRoomView {
   isPublic: boolean;
   mySeat: 0 | 1;
   me: { name: string; avatar: string; connected: boolean };
-  foe: { name: string; avatar: string; connected: boolean; left: boolean } | null;
+  foe: { name: string; avatar: string; connected: boolean; left: boolean; uid: string | null } | null;
   wins: [number, number];
   rematchMe: boolean;
   rematchFoe: boolean;
@@ -805,6 +808,8 @@ interface MpPlayer {
   avatar: string;
   lastPoll: number;
   leftAt: number | null;
+  /** постоянный ID игрока (код друга) — для «добавить в друзья» в матче */
+  uid: string | null;
 }
 
 interface MpRoom {
@@ -914,6 +919,14 @@ function cleanName(raw: unknown): string {
 function cleanAvatar(raw: unknown): string {
   const s = typeof raw === 'string' ? raw : '';
   return (AVATAR_IDS as readonly string[]).includes(s) ? s : 'ann';
+}
+
+/** постоянный ID игрока (код друга): 8 знаков из алфавита кодов комнат.
+ *  Он же — публичный «ID для друзей»: вводится с дефисами/без, сервер
+ *  нормализует. null — игрок без постоянного ID. */
+function cleanUid(raw: unknown): string | null {
+  const s = typeof raw === 'string' ? raw.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+  return /^[A-Z0-9]{8}$/.test(s) ? s : null;
 }
 
 function seatOf(room: MpRoom, playerId: string): 0 | 1 | null {
@@ -1054,11 +1067,17 @@ export function initPersistence(k: KvLike | null, c: ChanLike | null): void {
   }
 }
 
-/** соседний изолят изменил комнату: перечитать её и разпушить тем,
- *  чьи сокеты живут у нас (себе сообщение не доставляется) */
+/** соседний изолят изменил комнату или прислал событие друга: перечитать
+ *  и разпушить тем, чьи сокеты живут у нас (себе сообщение не доставляется) */
 async function handleChanMessage(data: unknown): Promise<void> {
   try {
     if (!data || typeof data !== 'object') return;
+    // событие друга: доставить локальным сокетам этого uid
+    const frData = (data as { fr?: { target?: unknown; payload?: unknown } }).fr;
+    if (frData && typeof frData.target === 'string' && frData.payload && typeof frData.payload === 'object') {
+      frSendLocal(frData.target, frData.payload as Record<string, unknown>);
+      return;
+    }
     const code = typeof (data as { code?: unknown }).code === 'string' ? (data as { code: string }).code : '';
     if (!code) return;
     const gone = (data as { gone?: unknown }).gone === true;
@@ -1199,8 +1218,8 @@ async function allRooms(strong: boolean): Promise<Array<{ room: MpRoom; versions
 // ===== внутренняя (синхронная) логика комнат =====
 
 /** посадить гостя в ждущую комнату и стартовать партию */
-function seatGuest(room: MpRoom, pid: string, name: string, avatar: string): void {
-  room.guest = { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null };
+function seatGuest(room: MpRoom, pid: string, name: string, avatar: string, uid: string | null = null): void {
+  room.guest = { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null, uid };
   room.state = createGame({
     seed: (Math.floor(Math.random() * 1e9) ^ Date.now()) >>> 0,
     mode: 'online',
@@ -1222,14 +1241,14 @@ function seatGuest(room: MpRoom, pid: string, name: string, avatar: string): voi
 }
 
 /** внутренняя логика join (валидации + старт партии); возвращает id гостя */
-function joinInternal(room: MpRoom, input: { name: string; avatar: string; playerId?: unknown }): string {
+function joinInternal(room: MpRoom, input: { name: string; avatar: string; playerId?: unknown; uid?: string | null }): string {
   if (typeof input.playerId === 'string' && input.playerId === room.host.id) throw 'ownroom';
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
   if (room.host.leftAt !== null) throw 'gone';
   tick(room);
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
   const guestId = genId();
-  seatGuest(room, guestId, input.name, input.avatar);
+  seatGuest(room, guestId, input.name, input.avatar, input.uid ?? null);
   return guestId;
 }
 
@@ -1518,6 +1537,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
           avatar: foe.avatar,
           connected: now - foe.lastPoll < CONNECTED_MS,
           left: foe.leftAt !== null,
+          uid: foe.uid,
         }
       : null,
     wins: [room.wins[0], room.wins[1]],
@@ -1542,7 +1562,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
 // в оперативной памяти (bun-тесты, локальный запуск без KV).
 
 /** создать комнату (приватную по коду или открытую для поиска) */
-export async function createRoomA(input: { name: unknown; avatar: unknown; isPublic: unknown }): Promise<{
+export async function createRoomA(input: { name: unknown; avatar: unknown; isPublic: unknown; uid?: unknown }): Promise<{
   code: string;
   playerId: string;
 }> {
@@ -1551,7 +1571,11 @@ export async function createRoomA(input: { name: unknown; avatar: unknown; isPub
   for (let i = 0; i < 6; i++) {
     const code = genCode();
     if (!kv && rooms.has(code)) continue;
-    const room = newRoom(code, { id: genId(), name, avatar: cleanAvatar(input.avatar), lastPoll: Date.now(), leftAt: null }, input.isPublic === true);
+    const room = newRoom(
+      code,
+      { id: genId(), name, avatar: cleanAvatar(input.avatar), lastPoll: Date.now(), leftAt: null, uid: cleanUid(input.uid) },
+      input.isPublic === true,
+    );
     // CAS «ключа ещё нет»: коллизия кодов невозможна даже между изолятами
     if (await saveRoom(room, null)) return { code: room.code, playerId: room.host.id };
   }
@@ -1559,7 +1583,7 @@ export async function createRoomA(input: { name: unknown; avatar: unknown; isPub
 }
 
 /** войти в комнату по коду (партия стартуется сразу) */
-export async function joinRoomA(input: { code: unknown; name: unknown; avatar: unknown; playerId?: unknown }): Promise<{
+export async function joinRoomA(input: { code: unknown; name: unknown; avatar: unknown; playerId?: unknown; uid?: unknown }): Promise<{
   code: string;
   playerId: string;
   room: MpRoom;
@@ -1570,7 +1594,7 @@ export async function joinRoomA(input: { code: unknown; name: unknown; avatar: u
   if (!/^[A-Z2-9]{6}$/.test(code)) throw 'notfound';
   const out = await mutateRoom(code, (room) => {
     revive(room);
-    return { result: joinInternal(room, { name, avatar: cleanAvatar(input.avatar), playerId: input.playerId }) };
+    return { result: joinInternal(room, { name, avatar: cleanAvatar(input.avatar), playerId: input.playerId, uid: cleanUid(input.uid) }) };
   });
   return { code, playerId: out.result, room: out.room };
 }
@@ -1713,7 +1737,7 @@ async function removeMyWaitingRoomA(code: string): Promise<void> {
  * В KV-режиме рассадка и уборка — CAS-операции: два искателя из
  * разных изолятов не займут одну комнату дважды.
  */
-export async function quickMatchA(input: { playerId?: unknown; name: unknown; avatar: unknown }): Promise<{
+export async function quickMatchA(input: { playerId?: unknown; name: unknown; avatar: unknown; uid?: unknown }): Promise<{
   status: 'matched' | 'waiting';
   code?: string;
   playerId: string;
@@ -1770,7 +1794,7 @@ export async function quickMatchA(input: { playerId?: unknown; name: unknown; av
         ) {
           return { result: false, skipSave: true };
         }
-        seatGuest(room, pid, name, avatar);
+        seatGuest(room, pid, name, avatar, cleanUid(input.uid));
         return { result: true };
       });
       if (out.result !== true) continue;
@@ -1786,7 +1810,7 @@ export async function quickMatchA(input: { playerId?: unknown; name: unknown; av
     for (let i = 0; i < 3; i++) {
       const code = genCode();
       if (!kv && rooms.has(code)) continue;
-      const room = newRoom(code, { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null }, true, true);
+      const room = newRoom(code, { id: pid, name, avatar, lastPoll: Date.now(), leftAt: null, uid: cleanUid(input.uid) }, true, true);
       if (await saveRoom(room, null)) break;
     }
   }
@@ -1803,6 +1827,469 @@ export async function quickCancelA(playerId: unknown): Promise<void> {
       notifyChan(mine.room.code, true);
     }
   }
+}
+
+// ============================================================
+// 6.5. ДРУЗЬЯ: постоянные ID, заявки, чат 1-на-1, приглашения в игру
+// ============================================================
+// Хранение — те же принципы, что у комнат: Deno KV на Deploy (данные
+// переживают перезапуск), в bun-тестах/без KV — оперативная память.
+// uid = 8-значный код (генерирует клиент один раз, хранит в профиле);
+// он же — публичный «ID для друзей». Протокол: hello регистрирует uid
+// (сокет с этого момента получает push-события fr_*), fr_* — действия,
+// {t:'fr_req'|'fr_ok'|'fr_gone'|'fr_msg'|'fr_invite'|'fr_invite_gone'}
+// — события другу (между изолятами — через BroadcastChannel).
+
+interface FrUser {
+  uid: string;
+  name: string;
+  avatar: string;
+  lastSeen: number;
+  createdAt: number;
+}
+interface FrRec {
+  uid: string;
+  since: number;
+}
+interface FrCard {
+  uid: string;
+  name: string;
+  avatar: string;
+}
+interface FrReqInfo {
+  from: FrCard;
+  at: number;
+}
+interface FrInviteInfo {
+  from: FrCard;
+  code: string;
+  at: number;
+}
+interface ChatMsg {
+  id: string;
+  from: string;
+  text: string;
+  at: number;
+}
+interface FrOutInfo {
+  at: number;
+}
+
+interface FrSnapshot {
+  code: string;
+  friends: Array<{ uid: string; name: string; avatar: string; online: boolean; unread: number }>;
+  requests: FrReqInfo[];
+  outgoing: Array<{ uid: string; at: number }>;
+  invites: FrInviteInfo[];
+}
+
+const FR_ONLINE_MS = 50_000; // «в сети» = был активен меньше 50с назад
+const FR_TOUCH_MS = 15_000; // как часто изолят освежает lastSeen в KV
+const FR_USER_WRITE_MS = 10_000; // чаще этого профиль в KV не переписываем
+const INVITE_TTL_MS = 60_000; // приглашение в игру живёт 60 секунд
+const REQ_TTL_MS = 14 * 24 * 3600_000; // заявка в друзья живёт 2 недели
+const MAX_FRIENDS = 50;
+const MAX_REQS = 20;
+const CHAT_CAP = 80; // сообщений в истории пары (лимит значения KV ~64КБ)
+const CHAT_TEXT_MAX = 300;
+const FR_SNAP_CACHE_MS = 4_000; // кэш снапшота в изоляте (экономия KV)
+
+/** память (режим без KV): пользователи/друзья/заявки/чаты */
+const memUsers = new Map<string, FrUser>();
+const memFriends = new Map<string, FrRec[]>();
+const memReq = new Map<string, FrReqInfo>(); // `${to}:${from}` — входящая заявка
+const memOut = new Map<string, FrOutInfo>(); // `${from}:${to}` — моя исходящая
+const memInvite = new Map<string, FrInviteInfo>(); // `${to}:${from}` — входящее приглашение
+const memChat = new Map<string, ChatMsg[]>(); // `${lo}:${hi}` — диалог пары
+const memRead = new Map<string, number>(); // `${me}:${peer}` — прочитано до
+const frSnapCache = new Map<string, { at: number; snap: FrSnapshot }>();
+
+function frSnapInvalidate(uid: string): void {
+  frSnapCache.delete(uid);
+}
+
+async function frUserGet(uid: string): Promise<FrUser | null> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_user', uid], { consistency: 'strong' });
+      return e && e.value ? (e.value as FrUser) : null;
+    } catch {
+      return null;
+    }
+  }
+  return memUsers.get(uid) ?? null;
+}
+
+async function frUserSet(u: FrUser): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_user', u.uid], u).commit();
+    } catch { /* квота/сбой — присутствие обновится позже */ }
+    return;
+  }
+  memUsers.set(u.uid, u);
+}
+
+/** upsert профиля игрока: имя/аватар/присутствие (частые записи гасим) */
+async function touchUserA(uid: string, name: string, avatar: string): Promise<FrUser> {
+  const now = Date.now();
+  const prev = await frUserGet(uid);
+  const next: FrUser = {
+    uid,
+    name: name || prev?.name || 'Игрок',
+    avatar: avatar || prev?.avatar || 'ann',
+    lastSeen: now,
+    createdAt: prev?.createdAt ?? now,
+  };
+  if (!prev || prev.name !== next.name || prev.avatar !== next.avatar || now - prev.lastSeen > FR_USER_WRITE_MS) {
+    await frUserSet(next);
+  }
+  return next;
+}
+
+async function frListGet(uid: string): Promise<FrRec[]> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_list', uid], { consistency: 'strong' });
+      const v = e && e.value ? (e.value as { list?: FrRec[] }) : null;
+      return Array.isArray(v?.list) ? v!.list : [];
+    } catch {
+      return [];
+    }
+  }
+  return memFriends.get(uid) ?? [];
+}
+
+async function frListSet(uid: string, list: FrRec[]): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_list', uid], { list }).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memFriends.set(uid, list);
+}
+
+async function frReqGet(to: string, from: string): Promise<FrReqInfo | null> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_req', to, from], { consistency: 'strong' });
+      return e && e.value ? (e.value as FrReqInfo) : null;
+    } catch {
+      return null;
+    }
+  }
+  return memReq.get(`${to}:${from}`) ?? null;
+}
+
+async function frReqSet(to: string, from: string, req: FrReqInfo): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_req', to, from], req).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memReq.set(`${to}:${from}`, req);
+}
+
+async function frReqDel(to: string, from: string): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().delete(['fr_req', to, from]).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memReq.delete(`${to}:${from}`);
+}
+
+async function frOutSet(from: string, to: string, at: number): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_out', from, to], { at }).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memOut.set(`${from}:${to}`, { at });
+}
+
+async function frOutDel(from: string, to: string): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().delete(['fr_out', from, to]).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memOut.delete(`${from}:${to}`);
+}
+
+async function inviteGet(to: string, from: string): Promise<FrInviteInfo | null> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_invite', to, from], { consistency: 'strong' });
+      return e && e.value ? (e.value as FrInviteInfo) : null;
+    } catch {
+      return null;
+    }
+  }
+  return memInvite.get(`${to}:${from}`) ?? null;
+}
+
+async function inviteSet(to: string, from: string, inv: FrInviteInfo): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_invite', to, from], inv).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memInvite.set(`${to}:${from}`, inv);
+}
+
+async function inviteDel(to: string, from: string): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().delete(['fr_invite', to, from]).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memInvite.delete(`${to}:${from}`);
+}
+
+function chatPair(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
+
+async function chatGet(a: string, b: string): Promise<ChatMsg[]> {
+  const [lo, hi] = chatPair(a, b);
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_chat', lo, hi], { consistency: 'strong' });
+      const v = e && e.value ? (e.value as { msgs?: ChatMsg[] }) : null;
+      return Array.isArray(v?.msgs) ? v!.msgs : [];
+    } catch {
+      return [];
+    }
+  }
+  return memChat.get(`${lo}:${hi}`) ?? [];
+}
+
+async function chatAppend(a: string, b: string, msg: ChatMsg): Promise<void> {
+  const [lo, hi] = chatPair(a, b);
+  const msgs = [...(await chatGet(a, b)), msg].slice(-CHAT_CAP);
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_chat', lo, hi], { msgs }).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memChat.set(`${lo}:${hi}`, msgs);
+}
+
+/** стереть переписку пары (вызывается при удалении из друзей —
+ *  политика конфиденциальности: чат живёт, пока жива дружба) */
+async function chatDel(a: string, b: string): Promise<void> {
+  const [lo, hi] = chatPair(a, b);
+  if (kv) {
+    try {
+      await kv.atomic()
+        .delete(['fr_chat', lo, hi])
+        .delete(['fr_read', lo, hi])
+        .delete(['fr_read', hi, lo])
+        .commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memChat.delete(`${lo}:${hi}`);
+  memRead.delete(`${lo}:${hi}`);
+  memRead.delete(`${hi}:${lo}`);
+}
+
+async function readGet(me: string, peer: string): Promise<number> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_read', me, peer]);
+      const v = e && e.value ? (e.value as { at?: number }) : null;
+      return typeof v?.at === 'number' ? v.at : 0;
+    } catch {
+      return 0;
+    }
+  }
+  return memRead.get(`${me}:${peer}`) ?? 0;
+}
+
+async function readSet(me: string, peer: string, at: number): Promise<void> {
+  if (kv) {
+    try {
+      await kv.atomic().set(['fr_read', me, peer], { at }).commit();
+    } catch { /* ignore */ }
+    return;
+  }
+  memRead.set(`${me}:${peer}`, at);
+}
+
+/** снапшот друга «как его видит uid» (для списка) */
+async function friendEntryFor(uid: string, f: FrRec, now: number): Promise<FrSnapshot['friends'][number]> {
+  const u = await frUserGet(f.uid);
+  const readTs = await readGet(uid, f.uid);
+  let unread = 0;
+  if (readTs > 0) {
+    const msgs = await chatGet(uid, f.uid);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].at <= readTs) break;
+      if (msgs[i].from === f.uid) unread++;
+    }
+  } else {
+    const msgs = await chatGet(uid, f.uid);
+    for (const m of msgs) if (m.from === f.uid) unread++;
+  }
+  return {
+    uid: f.uid,
+    name: u?.name ?? 'Игрок',
+    avatar: u?.avatar ?? 'ann',
+    online: u ? now - u.lastSeen < FR_ONLINE_MS : false,
+    unread,
+  };
+}
+
+/** полный снапшот раздела друзей (с коротким кэшем — экономия KV) */
+async function friendsSnapshotA(uid: string): Promise<FrSnapshot> {
+  const hit = frSnapCache.get(uid);
+  if (hit && Date.now() - hit.at < FR_SNAP_CACHE_MS) return hit.snap;
+  const now = Date.now();
+  const list = (await frListGet(uid)).slice(0, MAX_FRIENDS);
+  const friends: FrSnapshot['friends'] = [];
+  for (const f of list) {
+    friends.push(await friendEntryFor(uid, f, now));
+  }
+
+  // входящие заявки (просроченные прибираем на месте)
+  const requests: FrReqInfo[] = [];
+  if (kv) {
+    try {
+      const stale: string[] = [];
+      for await (const e of kv.list({ prefix: ['fr_req', uid] })) {
+        const req = e.value as FrReqInfo;
+        if (now - req.at > REQ_TTL_MS) {
+          stale.push(String((e.key as unknown[])[2] ?? ''));
+          continue;
+        }
+        requests.push(req);
+      }
+      for (const from of stale) {
+        if (from) await frReqDel(uid, from);
+      }
+    } catch { /* ignore */ }
+  } else {
+    for (const [k, req] of [...memReq.entries()]) {
+      if (!k.startsWith(`${uid}:`)) continue;
+      if (now - req.at > REQ_TTL_MS) {
+        memReq.delete(k);
+        continue;
+      }
+      requests.push(req);
+    }
+  }
+  requests.sort((a, b) => b.at - a.at);
+
+  // мои исходящие заявки
+  const outgoing: Array<{ uid: string; at: number }> = [];
+  if (kv) {
+    try {
+      for await (const e of kv.list({ prefix: ['fr_out', uid] })) {
+        const v = e.value as FrOutInfo;
+        if (now - v.at <= REQ_TTL_MS) outgoing.push({ uid: String((e.key as unknown[])[2] ?? ''), at: v.at });
+      }
+    } catch { /* ignore */ }
+  } else {
+    for (const [k, v] of [...memOut.entries()]) {
+      if (!k.startsWith(`${uid}:`)) continue;
+      if (now - v.at <= REQ_TTL_MS) outgoing.push({ uid: k.slice(uid.length + 1), at: v.at });
+    }
+  }
+
+  // приглашения в игру (живые, просроченные прибираем)
+  const invites: FrInviteInfo[] = [];
+  if (kv) {
+    try {
+      const stale: string[] = [];
+      for await (const e of kv.list({ prefix: ['fr_invite', uid] })) {
+        const inv = e.value as FrInviteInfo;
+        if (now - inv.at > INVITE_TTL_MS) {
+          stale.push(String((e.key as unknown[])[2] ?? ''));
+          continue;
+        }
+        invites.push(inv);
+      }
+      for (const from of stale) {
+        if (from) await inviteDel(uid, from);
+      }
+    } catch { /* ignore */ }
+  } else {
+    for (const [k, inv] of [...memInvite.entries()]) {
+      if (!k.startsWith(`${uid}:`)) continue;
+      if (now - inv.at > INVITE_TTL_MS) {
+        memInvite.delete(k);
+        continue;
+      }
+      invites.push(inv);
+    }
+  }
+  invites.sort((a, b) => b.at - a.at);
+
+  const snap: FrSnapshot = { code: uid, friends, requests: requests.slice(0, MAX_REQS), outgoing, invites };
+  frSnapCache.set(uid, { at: Date.now(), snap });
+  return snap;
+}
+
+/** принимать дружбу в обе стороны (заявку гасим) */
+async function acceptFriendA(me: string, other: string): Promise<void> {
+  const since = Date.now();
+  const mine = await frListGet(me);
+  if (!mine.find((f) => f.uid === other) && mine.length < MAX_FRIENDS) {
+    mine.push({ uid: other, since });
+    await frListSet(me, mine);
+  }
+  const theirs = await frListGet(other);
+  if (!theirs.find((f) => f.uid === me) && theirs.length < MAX_FRIENDS) {
+    theirs.push({ uid: me, since });
+    await frListSet(other, theirs);
+  }
+  await frReqDel(me, other); // моя входящая
+  await frOutDel(other, me); // их исходящая
+}
+
+/** отправить событие другу: локальные сокеты + соседние изоляты */
+function frSendLocal(target: string, payload: Record<string, unknown>): void {
+  for (const s of sockets.values()) {
+    if (s.alive && s.uid === target) {
+      try {
+        s.send(payload);
+      } catch { /* сокет умер — дворник приберёт */ }
+    }
+  }
+}
+
+function pushFrA(target: string, payload: Record<string, unknown>): void {
+  frSendLocal(target, payload);
+  try {
+    chan?.postMessage({ fr: { target, payload } });
+  } catch { /* ignore */ }
+}
+
+/** моя ждущая комната по uid (для приглашения — переиспользуем код) */
+async function findWaitingRoomOfUidA(uid: string): Promise<MpRoom | null> {
+  for (const { room } of await allRooms(true)) {
+    if (room.host.uid === uid && room.status === 'waiting' && room.guest === null) return room;
+  }
+  return null;
+}
+
+/** я сейчас играю (по uid)? — приглашать из партии нельзя */
+async function isPlayingUidA(uid: string): Promise<boolean> {
+  for (const { room } of await allRooms(true)) {
+    if (room.status !== 'playing') continue;
+    if (room.host.uid === uid || room.guest?.uid === uid) return true;
+  }
+  return false;
 }
 
 /** чистка протухших комнат — режим памяти (вызывается дворником) */
@@ -1829,6 +2316,14 @@ export function __resetForTests(): void {
   lastRoomsPush = 0;
   kvStats = { waiting: 0, playing: 0 };
   sweepCount = 0;
+  memUsers.clear();
+  memFriends.clear();
+  memReq.clear();
+  memOut.clear();
+  memInvite.clear();
+  memChat.clear();
+  memRead.clear();
+  frSnapCache.clear();
 }
 
 // ============================================================
@@ -1849,6 +2344,13 @@ export interface SocketCtx {
   /** комната, к которой сокет прикреплён (для мгновенных push) */
   code: string | null;
   playerId: string | null;
+  /** постоянный ID игрока (раздел «Друзья») — после hello */
+  uid: string | null;
+  /** профиль из hello — для присутствия и приглашений */
+  frName: string;
+  frAvatar: string;
+  /** когда последний раз писали профиль игрока в KV */
+  frTouch: number;
   /** время последнего сообщения от клиента (любого, вкл. pong) */
   lastSeen: number;
   /** время последнего отправленного пинга */
@@ -1871,6 +2373,10 @@ export function registerSocket(io: { send(obj: unknown): void; close(): void }):
     close: io.close,
     code: null,
     playerId: null,
+    uid: null,
+    frName: '',
+    frAvatar: 'ann',
+    frTouch: 0,
     lastSeen: Date.now(),
     lastPing: 0,
     pingId: 0,
@@ -1978,6 +2484,7 @@ export function handleSocketClose(ctx: SocketCtx): void {
   const { code, playerId } = ctx;
   ctx.code = null;
   ctx.playerId = null;
+  ctx.uid = null;
   if (!code || !playerId) return;
   void markDisconnectedA(code, playerId);
 }
@@ -2076,7 +2583,7 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
       }
 
       case 'quick': {
-        const res = await quickMatchA({ playerId: msg.playerId, name: msg.name, avatar: msg.avatar });
+        const res = await quickMatchA({ playerId: msg.playerId, name: msg.name, avatar: msg.avatar, uid: msg.uid });
         if (res.status === 'matched' && res.code) {
           attach(ctx, res.code, res.playerId);
           respond(ctx, ref, { ok: true, status: 'matched', code: res.code, playerId: res.playerId });
@@ -2105,6 +2612,194 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
 
       case 'rooms': {
         respond(ctx, ref, { ok: true, rooms: await listRoomsA() });
+        return;
+      }
+
+      // ===== ДРУЗЬЯ =====
+
+      case 'hello': {
+        // регистрация постоянного ID: с этого момента сокет получает
+        // push-события друзей (заявки/сообщения/приглашения) где бы ни был
+        const uid = cleanUid(msg.uid);
+        const name = cleanName(msg.name);
+        if (!uid) throw 'badpayload';
+        ctx.uid = uid;
+        ctx.frName = name;
+        ctx.frAvatar = cleanAvatar(msg.avatar);
+        await touchUserA(uid, name, ctx.frAvatar);
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(uid) });
+        return;
+      }
+
+      case 'fr_sync': {
+        if (!ctx.uid) throw 'badpayload';
+        await touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(ctx.uid) });
+        return;
+      }
+
+      case 'fr_add': {
+        if (!ctx.uid) throw 'badpayload';
+        const me = ctx.uid;
+        const target = cleanUid(msg.code ?? msg.uid);
+        if (!target) throw 'badcode';
+        if (target === me) throw 'self';
+        const tu = await frUserGet(target);
+        if (!tu) throw 'badcode';
+        const mine = await frListGet(me);
+        if (mine.find((f) => f.uid === target)) throw 'already';
+        if (mine.length >= MAX_FRIENDS) throw 'toomany';
+        const meCard = await touchUserA(me, ctx.frName, ctx.frAvatar);
+        // встречная заявка — мгновенное принятие
+        if (await frReqGet(me, target)) {
+          await acceptFriendA(me, target);
+          frSnapInvalidate(me);
+          frSnapInvalidate(target);
+          pushFrA(target, { t: 'fr_ok', user: { uid: me, name: meCard.name, avatar: meCard.avatar } });
+          respond(ctx, ref, { ok: true, accepted: true, snapshot: await friendsSnapshotA(me) });
+          return;
+        }
+        const at = Date.now();
+        await frReqSet(target, me, { from: { uid: me, name: meCard.name, avatar: meCard.avatar }, at });
+        await frOutSet(me, target, at);
+        frSnapInvalidate(me);
+        frSnapInvalidate(target);
+        pushFrA(target, { t: 'fr_req', req: { from: { uid: me, name: meCard.name, avatar: meCard.avatar }, at } });
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(me) });
+        return;
+      }
+
+      case 'fr_accept': {
+        const from = cleanUid(msg.uid);
+        if (!ctx.uid || !from) throw 'badpayload';
+        if (!(await frReqGet(ctx.uid, from))) throw 'gone';
+        const meCard = await touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
+        await acceptFriendA(ctx.uid, from);
+        frSnapInvalidate(ctx.uid);
+        frSnapInvalidate(from);
+        pushFrA(from, { t: 'fr_ok', user: { uid: ctx.uid, name: meCard.name, avatar: meCard.avatar } });
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(ctx.uid) });
+        return;
+      }
+
+      case 'fr_decline': {
+        const from = cleanUid(msg.uid);
+        if (!ctx.uid || !from) throw 'badpayload';
+        await frReqDel(ctx.uid, from);
+        await frOutDel(from, ctx.uid);
+        frSnapInvalidate(ctx.uid);
+        frSnapInvalidate(from);
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(ctx.uid) });
+        return;
+      }
+
+      case 'fr_remove': {
+        const other = cleanUid(msg.uid);
+        if (!ctx.uid || !other) throw 'badpayload';
+        await frListSet(ctx.uid, (await frListGet(ctx.uid)).filter((f) => f.uid !== other));
+        await frListSet(other, (await frListGet(other)).filter((f) => f.uid !== ctx.uid));
+        // дружба закончилась — стираем переписку пары (политика
+        // конфиденциальности: чат хранится, пока стороны — друзья)
+        await chatDel(ctx.uid, other);
+        frSnapInvalidate(ctx.uid);
+        frSnapInvalidate(other);
+        pushFrA(other, { t: 'fr_gone', uid: ctx.uid });
+        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(ctx.uid) });
+        return;
+      }
+
+      case 'fr_msg': {
+        const to = cleanUid(msg.to);
+        const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, CHAT_TEXT_MAX) : '';
+        if (!ctx.uid || !to || text.length < 1) throw 'badpayload';
+        if (!(await frListGet(ctx.uid)).find((f) => f.uid === to)) throw 'notfriends';
+        const m: ChatMsg = { id: genId(), from: ctx.uid, text, at: Date.now() };
+        await chatAppend(ctx.uid, to, m);
+        frSnapInvalidate(ctx.uid);
+        frSnapInvalidate(to);
+        pushFrA(to, { t: 'fr_msg', from: ctx.uid, msg: m });
+        respond(ctx, ref, { ok: true, msg: m });
+        return;
+      }
+
+      case 'fr_read': {
+        const peer = cleanUid(msg.uid);
+        if (!ctx.uid || !peer) throw 'badpayload';
+        await readSet(ctx.uid, peer, Date.now());
+        frSnapInvalidate(ctx.uid);
+        respond(ctx, ref, { ok: true });
+        return;
+      }
+
+      case 'fr_chat': {
+        const peer = cleanUid(msg.uid);
+        if (!ctx.uid || !peer) throw 'badpayload';
+        if (!(await frListGet(ctx.uid)).find((f) => f.uid === peer)) throw 'notfriends';
+        const msgs = await chatGet(ctx.uid, peer);
+        await readSet(ctx.uid, peer, Date.now());
+        frSnapInvalidate(ctx.uid);
+        respond(ctx, ref, { ok: true, msgs });
+        return;
+      }
+
+      case 'fr_invite': {
+        const to = cleanUid(msg.to);
+        if (!ctx.uid || !to) throw 'badpayload';
+        const me = ctx.uid;
+        if (!(await frListGet(me)).find((f) => f.uid === to)) throw 'notfriends';
+        if (await isPlayingUidA(me)) throw 'inroom';
+        // своя ждущая комната — переиспользуем; иначе новая приватная
+        let code: string;
+        let playerId: string;
+        const existing = await findWaitingRoomOfUidA(me);
+        if (existing) {
+          code = existing.code;
+          playerId = existing.host.id;
+        } else {
+          const res = await createRoomA({ name: ctx.frName, avatar: ctx.frAvatar, isPublic: false, uid: me });
+          code = res.code;
+          playerId = res.playerId;
+        }
+        const meCard = await touchUserA(me, ctx.frName, ctx.frAvatar);
+        const inv: FrInviteInfo = { from: { uid: me, name: meCard.name, avatar: meCard.avatar }, code, at: Date.now() };
+        await inviteSet(to, me, inv);
+        frSnapInvalidate(to);
+        pushFrA(to, { t: 'fr_invite', invite: inv });
+        respond(ctx, ref, { ok: true, code, playerId });
+        return;
+      }
+
+      case 'fr_invite_accept': {
+        const from = cleanUid(msg.uid);
+        if (!ctx.uid || !from) throw 'badpayload';
+        const me = ctx.uid;
+        const inv = await inviteGet(me, from);
+        if (!inv || Date.now() - inv.at > INVITE_TTL_MS) {
+          await inviteDel(me, from);
+          throw 'gone';
+        }
+        const name = cleanName(msg.name) || ctx.frName;
+        const res = await joinRoomA({ code: inv.code, name, avatar: msg.avatar, uid: me });
+        await inviteDel(me, from);
+        frSnapInvalidate(me);
+        frSnapInvalidate(from);
+        attach(ctx, res.code, res.playerId);
+        respond(ctx, ref, { ok: true, code: res.code, playerId: res.playerId });
+        broadcastRoom(res.room); // приглашённый в партии — хост видит мгновенно
+        notifyChan(res.code);
+        void pushRoomsA();
+        pushFrA(from, { t: 'fr_invite_gone', from: me });
+        return;
+      }
+
+      case 'fr_invite_decline': {
+        const from = cleanUid(msg.uid);
+        if (!ctx.uid || !from) throw 'badpayload';
+        await inviteDel(ctx.uid, from);
+        frSnapInvalidate(ctx.uid);
+        frSnapInvalidate(from);
+        pushFrA(from, { t: 'fr_invite_gone', from: ctx.uid });
+        respond(ctx, ref, { ok: true });
         return;
       }
 
@@ -2166,6 +2861,16 @@ async function sweepTick(): Promise<void> {
       ctx.code = null;
       ctx.playerId = null;
       if (code && playerId) void markDisconnectedA(code, playerId);
+    }
+  }
+
+  // 1.5) присутствие друзей: сокеты с uid освежают профиль в KV
+  //      (иначе «в сети» гаснет, когда игрок просто сидит в меню)
+  for (const ctx of [...sockets.values()]) {
+    if (!ctx.alive || !ctx.uid) continue;
+    if (now - ctx.frTouch >= FR_TOUCH_MS) {
+      ctx.frTouch = now;
+      void touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
     }
   }
 

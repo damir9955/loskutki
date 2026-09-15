@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   BookOpen,
   BarChart3,
+  Heart,
   Settings2,
+  ShieldCheck,
   Play,
   CalendarDays,
   Sparkles,
@@ -23,8 +25,9 @@ import { Switch } from '@/components/ui/switch';
 import { BOT_PERSONAS, PATCHES, type BotLevel } from '@/lib/game/constants';
 import { orientationCells } from './PatchGlyph';
 import { orientationsFor } from '@/lib/game/placement';
-import { BotAvatar, GlyphDirect } from './MarketRow';
+import { BotAvatar, GlyphDirect, Portrait } from './MarketRow';
 import { PatchGlyph } from './PatchGlyph';
+import { avatarUrl } from '@/lib/avatars';
 import {
   ACHIEVEMENTS,
   loadStore,
@@ -38,6 +41,10 @@ import {
 import { dailyNumber } from '@/lib/game/rng';
 import { useOnline } from '@/lib/useOnline';
 import { APP_VERSION } from '@/lib/version';
+import { useFriends } from '@/lib/friends';
+import { mpJoin, mpListRooms, mpOnRooms, mpWsEnabled, type MpSession } from '@/lib/net';
+import type { OpenRoomInfo } from '@/lib/ws';
+import { FriendsDialog } from './FriendsDialog';
 import {
   achDesc,
   achTitle,
@@ -125,6 +132,10 @@ export interface HomeScreenProps {
   onOpenRules: () => void;
   onOnline: () => void;
   onQuickOnline: () => void;
+  /** живая онлайн-сессия (чтобы не предлагать свою же комнату в баннере) */
+  session?: MpSession | null;
+  /** вход в комнату из меню: баннер «ждёт игру» / приглашение друга */
+  onJoinRoom?: (s: MpSession, role: 'host' | 'guest') => void;
 }
 
 /** Декоративная сцена-фон меню: тёплый свет сверху, «пушинки» в луче,
@@ -241,19 +252,19 @@ function HangingPatch({
 /** Бегущая стёжка под заголовком — «иголка шьёт прямо сейчас» */
 function NeedleLine() {
   return (
-    <svg viewBox="0 0 220 18" className="mt-1.5 h-[18px] w-[220px] max-w-[60vw]" aria-hidden>
+    <svg viewBox="0 0 220 14" className="mt-1 h-[13px] w-[190px] max-w-[56vw]" aria-hidden>
       <path
-        d="M6 9 C 60 4, 160 14, 214 8"
+        d="M6 7 C 60 3, 160 11, 214 6"
         fill="none"
         stroke="#C0603A"
-        strokeWidth="2.4"
+        strokeWidth="2.2"
         strokeLinecap="round"
         className="needle-run"
       />
       {/* иголка на конце стёжки */}
       <g>
-        <rect x={210} y={5.4} width={4.4} height={7.2} rx={1} fill="#B9BCC1" stroke="#7E8288" strokeWidth={0.8} />
-        <rect x={212.4} y={7.2} width={1.6} height={3.6} rx={0.8} fill="#5B6167" />
+        <rect x={210} y={4.2} width={4.2} height={5.6} rx={1} fill="#B9BCC1" stroke="#7E8288" strokeWidth={0.8} />
+        <rect x={212.2} y={5.6} width={1.5} height={2.8} rx={0.8} fill="#5B6167" />
       </g>
     </svg>
   );
@@ -266,6 +277,8 @@ export function HomeScreen({
   onOpenRules,
   onOnline,
   onQuickOnline,
+  session,
+  onJoinRoom,
 }: HomeScreenProps) {
   const { toast } = useToast();
   const lang = useLang();
@@ -274,40 +287,120 @@ export function HomeScreen({
   const [pickOpen, setPickOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [busyRoom, setBusyRoom] = useState(false);
 
   const store = useSyncExternalStore(subscribeStore, getStoreSnapshot, getStoreServerSnapshot);
   const online = useOnline();
+  const fr = useFriends();
 
   const s = store.stats;
   const daily = store.daily[todayKey()];
   const resumeGame = store.currentGame ?? null;
 
+  // ===== баннер «кто-то ищет быструю игру» (снизу меню) =====
+  const [waiters, setWaiters] = useState<OpenRoomInfo[] | null>(null);
+  useEffect(() => {
+    if (!online) {
+      setWaiters(null);
+      return;
+    }
+    if (mpWsEnabled()) {
+      // WS-режим: сервер сам рассылает список открытых комнат каждые ~3с
+      return mpOnRooms((rooms) => setWaiters(rooms ?? []));
+    }
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      const rooms = await mpListRooms();
+      if (stop) return;
+      setWaiters(rooms);
+      timer = setTimeout(refresh, 6000);
+    };
+    void refresh();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [online]);
+
+  const quickWaiters = useMemo(
+    () => (waiters ?? []).filter((r) => r.quick && r.code !== session?.code).slice(0, 2),
+    [waiters, session?.code],
+  );
+
+  const joinWaiter = async (roomCode: string) => {
+    if (busyRoom) return;
+    setBusyRoom(true);
+    sound.ensure();
+    sound.tap();
+    try {
+      const p = loadProfileForJoin();
+      const { code, playerId } = await mpJoin({
+        code: roomCode,
+        name: p.name,
+        avatar: p.avatar,
+        uid: p.uid,
+      });
+      const s2: MpSession = { playerId, code, name: p.name, avatar: p.avatar };
+      onJoinRoom?.(s2, 'guest');
+    } catch (e) {
+      toast({ title: t(mpErrorKeyJoin((e as { code?: string })?.code ?? '')) });
+    } finally {
+      setBusyRoom(false);
+    }
+  };
+
+  const frBadge =
+    fr.friends.reduce((n, f) => n + f.unread, 0) + fr.requests.length + fr.invites.length;
+
   return (
-    <div className="relative mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-10 md:max-w-[880px] md:px-8">
+    <div className="relative mx-auto flex min-h-svh w-full max-w-[520px] flex-col items-center px-4 pb-[max(env(safe-area-inset-bottom),8px)] pt-[max(env(safe-area-inset-top),10px)] md:max-w-[880px] md:px-8">
       {/* живая сцена-фон */}
       <MenuScene />
+
+      {/* небольшая отдельная кнопка «Друзья» с индикацией событий */}
+      <button
+        type="button"
+        onClick={() => {
+          sound.ensure();
+          sound.tap();
+          setFriendsOpen(true);
+        }}
+        className={`btn-cloth absolute right-4 top-[max(env(safe-area-inset-top),12px)] z-20 flex h-11 w-11 items-center justify-center rounded-2xl md:right-8 ${
+          online && fr.available ? '' : 'opacity-60'
+        }`}
+        aria-label={t('fr_title')}
+      >
+        <Heart className={`h-5.5 w-5.5 ${frBadge > 0 ? 'text-[#C33A2F]' : 'text-[#A6721F]'}`} fill={frBadge > 0 ? '#F3C1BA' : 'none'} />
+        {frBadge > 0 && (
+          <span className="pop-in absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-card bg-[#C33A2F] px-1 text-[10.5px] font-extrabold text-white">
+            {frBadge > 99 ? '99+' : frBadge}
+          </span>
+        )}
+      </button>
 
       {/* шапка: верёвка + логотип + заголовок */}
       <div className="relative z-10 flex w-full flex-col items-center">
         <Clothesline />
         <div className="logo-float pop-in relative">
-          <LogoMark size={108} />
+          <LogoMark size={76} />
         </div>
         <h1
-          className="font-display title-stitch mt-2 text-[46px] leading-none text-foreground"
+          className="font-display title-stitch mt-1.5 text-[36px] leading-none text-foreground md:text-[42px]"
           style={{ letterSpacing: '0.04em' }}
         >
           {t('app_title')}
         </h1>
         <NeedleLine />
-        <p className="mt-1 text-[15px] font-bold tracking-wide text-muted-foreground">
+        <p className="mt-0.5 text-[13px] font-bold tracking-wide text-muted-foreground md:text-[14px]">
           {t('app_subtitle')}
         </p>
       </div>
 
-      <div className="stitch-divider my-4 mt-5 w-full max-w-[300px]" />
+      <div className="stitch-divider my-2.5 w-full max-w-[300px]" />
 
-      {/* Продолжить партию */}
+      {/* Продолжить партию — меню не должно прокручиваться даже с ней */}
       {resumeGame && resumeGame.phase !== 'gameover' && (
         <button
           type="button"
@@ -316,26 +409,26 @@ export function HomeScreen({
             sound.tap();
             onResume(resumeGame);
           }}
-          className="patch-tilt-l2 stitched-card mb-3 flex w-full items-center gap-3 p-3 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
+          className="stitched-card mb-2 flex w-full items-center gap-2.5 p-2 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
         >
-          <div className="w-[54px] shrink-0">
+          <div className="w-[42px] shrink-0">
             <MiniQuilt board={resumeGame.players[0].board} className="w-full rounded-md border border-border" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[16px] font-extrabold text-foreground">{t('home_resume')}</div>
-            <div className="text-[12.5px] font-semibold text-muted-foreground">
+            <div className="text-[14px] font-extrabold text-foreground">{t('home_resume')}</div>
+            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">
               {t('home_resume_vs', { name: personaName(lang, resumeGame.botLevel), n: resumeGame.turn + 1 })}
             </div>
           </div>
-          <RotateCcw className="h-5 w-5 shrink-0 text-primary" />
+          <RotateCcw className="h-4.5 w-4.5 shrink-0 text-primary" />
         </button>
       )}
 
       {/* Основные кнопки: на планшете — карточки в ряд */}
-      <div className="relative z-10 w-full space-y-3 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
+      <div className="relative z-10 w-full space-y-2 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
         <Button
           size="lg"
-          className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold md:col-span-3 md:h-auto md:min-h-[78px] md:text-[18px]"
+          className="btn-wood h-12 w-full rounded-2xl text-[16px] font-extrabold md:col-span-3 md:h-auto md:min-h-[64px] md:text-[18px]"
           onClick={() => {
             sound.ensure();
             sound.tap();
@@ -358,29 +451,29 @@ export function HomeScreen({
             sound.tap();
             onQuickOnline();
           }}
-          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+          className={`flex w-full items-center gap-2.5 rounded-2xl border-2 p-2.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
             online
               ? 'border-[#8AA06F]/60 bg-[#8AA06F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(70,100,40,.45)]'
               : 'border-border bg-muted/60 opacity-80'
           }`}
         >
-          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
-            <Zap className="h-6 w-6 text-[#4e6437]" fill="#cfe0b4" />
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
+            <Zap className="h-5.5 w-5.5 text-[#4e6437]" fill="#cfe0b4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[16px] font-extrabold text-foreground">
+            <div className="flex items-center gap-2 text-[14.5px] font-extrabold text-foreground">
               {t('home_quick')}
               {online ? (
                 <span className="flex shrink-0 items-center gap-1">
                   <span className="dot-online" />
                 </span>
               ) : (
-                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-extrabold text-muted-foreground">
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[9.5px] font-extrabold text-muted-foreground">
                   {t('home_quick_off')}
                 </span>
               )}
             </div>
-            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('home_quick_h')}</div>
+            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">{t('home_quick_h')}</div>
           </div>
         </button>
 
@@ -396,14 +489,14 @@ export function HomeScreen({
             sound.tap();
             onOnline();
           }}
-          className="patch-tilt-l flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+          className="flex w-full items-center gap-2.5 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-2.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
         >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
-            <Users className="h-6 w-6 text-[#3D5A77]" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
+            <Users className="h-5.5 w-5.5 text-[#3D5A77]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[16px] font-extrabold text-foreground">{t('mp_title')}</div>
-            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
+            <div className="text-[14.5px] font-extrabold text-foreground">{t('mp_title')}</div>
+            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
           </div>
         </button>
 
@@ -424,21 +517,21 @@ export function HomeScreen({
             }
             onDaily();
           }}
-          className={`patch-tilt-r2 flex w-full items-center gap-3 rounded-2xl border-2 p-3.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+          className={`flex w-full items-center gap-2.5 rounded-2xl border-2 p-2.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
             daily
               ? 'border-border bg-muted/60 opacity-80'
               : 'border-[#D9A13F]/60 bg-[#D9A13F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(120,80,20,.45)]'
           }`}
         >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
-            <CalendarDays className="h-6 w-6 text-[#A6721F]" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
+            <CalendarDays className="h-5.5 w-5.5 text-[#A6721F]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 text-[16px] font-extrabold text-foreground">
+            <div className="flex items-center gap-1.5 text-[14.5px] font-extrabold text-foreground">
               {t('home_daily', { n: dailyNumber(new Date()) })}
               <Sparkles className="h-3.5 w-3.5 text-[#A6721F]" />
             </div>
-            <div className="text-[12.5px] font-semibold text-muted-foreground">
+            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">
               {daily
                 ? t('home_daily_played', {
                     res: daily.won ? t('win') : t('loss'),
@@ -450,35 +543,63 @@ export function HomeScreen({
         </button>
       </div>
 
+      <div className="min-h-2 flex-1" />
+
+      {/* снизу в меню: кто-то ищет быструю игру — можно сразу войти */}
+      {online && quickWaiters.length > 0 && (
+        <div className="pop-in relative z-10 mb-2 w-full space-y-1.5">
+          {quickWaiters.map((w) => (
+            <button
+              key={w.code}
+              type="button"
+              disabled={busyRoom}
+              onClick={() => void joinWaiter(w.code)}
+              className="stitched-card flex w-full items-center gap-2.5 border-[#8AA06F]/50 bg-[#8AA06F]/10 p-2 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/25">
+                <Portrait src={avatarUrl(w.hostAvatar)} size={30} alt={w.hostName} />
+                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#8AA06F] text-white">
+                  <Zap className="h-2.5 w-2.5" fill="#fff" />
+                </span>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-extrabold text-foreground">
+                  {t('home_waiting', { name: w.hostName })}
+                </span>
+                {quickWaiters.length > 1 && (
+                  <span className="block text-[11px] font-bold text-muted-foreground">
+                    {t('home_waiting_many', { n: quickWaiters.length })}
+                  </span>
+                )}
+              </span>
+              <span className="btn-wood flex h-9 shrink-0 items-center rounded-xl px-3.5 text-[13px] font-extrabold text-white">
+                {t('home_waiting_join')}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Нижний ряд */}
-      <div className="relative z-10 mt-4 grid w-full grid-cols-3 gap-2.5">
-        <MenuTile icon={<BookOpen className="h-6 w-6" />} label={t('home_rules')} onClick={onOpenRules} tilt="l" />
+      <div className="relative z-10 grid w-full grid-cols-3 gap-2.5">
+        <MenuTile icon={<BookOpen className="h-5.5 w-5.5" />} label={t('home_rules')} onClick={onOpenRules} />
         <MenuTile
-          icon={<BarChart3 className="h-6 w-6" />}
+          icon={<BarChart3 className="h-5.5 w-5.5" />}
           label={t('home_stats')}
           badge={s ? (s.games > 0 ? `${s.wins}${t('win')[0].toUpperCase()}` : undefined) : undefined}
           onClick={() => {
             sound.tap();
             setStatsOpen(true);
           }}
-          tilt="r"
         />
         <MenuTile
-          icon={<Settings2 className="h-6 w-6" />}
+          icon={<Settings2 className="h-5.5 w-5.5" />}
           label={t('home_settings')}
           onClick={() => {
             sound.tap();
             setSettingsOpen(true);
           }}
-          tilt="l2"
         />
-      </div>
-
-      <div className="flex-1" />
-
-      {/* версия сборки — всегда видно, свежая ли у вас */}
-      <div className="relative z-10 mt-4 flex items-center gap-1.5 text-[10.5px] font-extrabold tracking-wide text-muted-foreground/80">
-        v{APP_VERSION} · {t('home_ver')}
       </div>
 
       {/* ===== Выбор соперника ===== */}
@@ -539,8 +660,42 @@ export function HomeScreen({
 
       {/* ===== Настройки ===== */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* ===== Друзья ===== */}
+      <FriendsDialog
+        open={friendsOpen}
+        onOpenChange={setFriendsOpen}
+        onJoinRoom={(j, role) => {
+          const s2: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic };
+          onJoinRoom?.(s2, role);
+        }}
+      />
     </div>
   );
+}
+
+/** профиль для входа в комнату из баннера ожидания */
+function loadProfileForJoin(): { name: string; avatar: string; uid: string } {
+  try {
+    const raw = localStorage.getItem('loskutki.mp.profile.v1');
+    if (raw) {
+      const p = JSON.parse(raw) as { name?: string; avatar?: string; uid?: string };
+      if (typeof p.name === 'string' && p.name.trim()) {
+        return { name: p.name.trim().slice(0, 16), avatar: p.avatar ?? 'ann', uid: p.uid ?? '' };
+      }
+    }
+  } catch { /* ignore */ }
+  return { name: '', avatar: 'ann', uid: '' };
+}
+
+function mpErrorKeyJoin(code: string): string {
+  switch (code) {
+    case 'notfound': return 'mp_notfound';
+    case 'full': return 'mp_full';
+    case 'started': return 'mp_started';
+    case 'ownroom': return 'mp_own_room';
+    default: return 'mp_net';
+  }
 }
 
 function MenuTile({
@@ -548,20 +703,17 @@ function MenuTile({
   label,
   onClick,
   badge,
-  tilt,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   badge?: string;
-  tilt?: 'l' | 'r' | 'l2' | 'r2';
 }) {
-  const tiltCls = tilt === 'l' ? ' patch-tilt-l' : tilt === 'r' ? ' patch-tilt-r' : tilt === 'l2' ? ' patch-tilt-l2' : tilt === 'r2' ? ' patch-tilt-r2' : '';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`stitched-card${tiltCls} flex flex-col items-center gap-1.5 px-2 py-4 transition-transform hover:-translate-y-0.5 active:translate-y-0`}
+      className="stitched-card flex flex-col items-center gap-1 px-2 py-2.5 transition-transform hover:-translate-y-0.5 active:translate-y-0"
     >
       <div className="relative text-primary">
         {icon}
@@ -571,7 +723,7 @@ function MenuTile({
           </span>
         )}
       </div>
-      <span className="text-[12.5px] font-extrabold text-foreground">{label}</span>
+      <span className="text-[12px] font-extrabold text-foreground">{label}</span>
     </button>
   );
 }
@@ -654,6 +806,27 @@ function StatsDialog({
                   </div>
                 );
               })}
+            </div>
+          </>
+        )}
+        {/* друзья — личный счёт онлайн-партий */}
+        {Object.keys(store.friendStats).length > 0 && (
+          <>
+            <div className="stitch-divider my-2" />
+            <h3 className="font-display text-[18px]">{t('stats_friends')}</h3>
+            <div className="space-y-1">
+              {Object.values(store.friendStats)
+                .sort((a, b) => b.games - a.games)
+                .slice(0, 20)
+                .map((fs) => (
+                  <div key={fs.name + fs.lastAt} className="flex items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5">
+                    <img src={avatarUrl(fs.avatar)} alt={fs.name} className="h-7 w-7 rounded-full border border-border object-cover" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-extrabold">{fs.name}</span>
+                    <span className="shrink-0 text-[12px] font-bold text-muted-foreground">
+                      {t('fr_vs', { g: fs.games, w: fs.wins })}
+                    </span>
+                  </div>
+                ))}
             </div>
           </>
         )}
@@ -810,6 +983,21 @@ function SettingsDialog({
           >
             {t('set_reset')}
           </button>
+          {/* политика конфиденциальности — ссылка для Google Play, открывается
+              в новой вкладке и работает даже без установленной игры */}
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-border bg-card py-2.5 text-[14px] font-extrabold text-foreground/75 transition-colors hover:bg-muted"
+          >
+            <ShieldCheck className="h-4 w-4 text-[#7A8B5A]" />
+            {t('set_privacy')}
+          </a>
+          {/* версия сборки — перенесена из футера меню по просьбе пользователя */}
+          <div className="pt-1 text-center text-[11px] font-extrabold tracking-wide text-muted-foreground/80">
+            {t('set_version', { v: APP_VERSION })}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

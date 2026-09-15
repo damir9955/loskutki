@@ -39,6 +39,17 @@ interface PendingReq {
 type ViewListener = (view: MpRoomView) => void;
 type RoomsListener = (rooms: OpenRoomInfo[]) => void;
 type StatusListener = (connected: boolean) => void;
+/** push-события друзей: {t:'fr_req'|'fr_ok'|'fr_gone'|'fr_msg'|'fr_invite'|'fr_invite_gone', ...} */
+type FriendsListener = (m: Record<string, unknown>) => void;
+
+/** тип сообщения-события друзей (см. deno/server.ts) */
+export type FrEvent =
+  | 'fr_req'
+  | 'fr_ok'
+  | 'fr_gone'
+  | 'fr_msg'
+  | 'fr_invite'
+  | 'fr_invite_gone';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_JITTER_MS = 500;
@@ -82,6 +93,7 @@ class WsClient {
   private viewSubs = new Set<ViewListener>();
   private roomsSubs = new Set<RoomsListener>();
   private statusSubs = new Set<StatusListener>();
+  private friendsSubs = new Set<FriendsListener>();
   private lastMsgAt = 0;
   private closedByIdle = false;
 
@@ -233,6 +245,13 @@ class WsClient {
           cb(rooms);
         } catch { /* ignore */ }
       }
+    } else if (t.startsWith('fr_')) {
+      // события друзей (заявка/сообщение/приглашение) — в стор друзей
+      for (const cb of this.friendsSubs) {
+        try {
+          cb(m);
+        } catch { /* подписчик ошибся — не роняем транспорт */ }
+      }
     } else if (t === 'ping') {
       // heartbeat сервера — отвечаем мгновенно
       this.rawSend({ t: 'pong', id: m.id });
@@ -283,6 +302,7 @@ class WsClient {
         this.viewSubs.size === 0 &&
         this.roomsSubs.size === 0 &&
         this.statusSubs.size === 0 &&
+        this.friendsSubs.size === 0 &&
         this.pending.size === 0 &&
         now - this.lastMsgAt > IDLE_CLOSE_MS
       ) {
@@ -319,6 +339,13 @@ class WsClient {
     if (this.isOpen()) cb(true);
     void this.connect();
     return () => this.statusSubs.delete(cb);
+  }
+
+  /** push-события друзей — держит сокет живым, пока подписан */
+  onFriends(cb: FriendsListener): () => void {
+    this.friendsSubs.add(cb);
+    void this.connect();
+    return () => this.friendsSubs.delete(cb);
   }
 }
 
