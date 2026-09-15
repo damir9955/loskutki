@@ -84,6 +84,10 @@ const DICT: Record<string, [string, string]> = {
   home_waiting: ['{name} ждёт соперника', '{name} is waiting for an opponent'],
   home_waiting_many: ['{n} игрока ищут партию', '{n} players are looking for a match'],
   home_waiting_join: ['Играть', 'Play'],
+  home_rooms_title: ['Открытые комнаты', 'Open rooms'],
+  home_rooms_join: ['Играть', 'Play'],
+  home_rooms_return: ['Вернуться', 'Return'],
+  home_rooms_yours: ['ваша комната', 'your room'],
   duel_mode: ['пэчворк-дуэль', 'patchwork duel'],
   daily_mode: ['игра дня №{n}', 'daily game #{n}'],
   win: ['победа', 'win'],
@@ -164,6 +168,9 @@ const DICT: Record<string, [string, string]> = {
   ],
   mp_own_room: ['Это ваша комната — вернитесь в неё и ждите соперника', 'This is your own room — return to it and wait for your opponent'],
   mp_have_room: ['У вас уже есть комната — ждём в ней', 'You already have a room — waiting in it'],
+  mp_room_recreated: ['Старая комната закрыта — создаём новую', 'Old room closed — creating a new one'],
+  mp_leave_yes: ['Покинуть', 'Leave'],
+  mp_leave_no: ['Остаться', 'Stay'],
   mp_your_room: ['ваша', 'yours'],
   mp_return: ['Вернуться', 'Return'],
   mp_you: ['Вы', 'You'],
@@ -177,6 +184,9 @@ const DICT: Record<string, [string, string]> = {
   mp_quick_found: ['Соперник найден!', 'Opponent found!'],
   mp_quick_cancel: ['Отменить поиск', 'Cancel search'],
   mp_timer_paused: ['таймер на паузе — соперник не на связи', 'timer paused — the opponent is offline'],
+  mp_chat_title: ['Чат с соперником', 'Chat with opponent'],
+  mp_chat_empty: ['Переписка живёт, пока идёт партия', 'This chat lives as long as the game'],
+  mp_chat_ph: ['Сообщение сопернику…', 'Message your opponent…'],
 
   // — друзья —
   fr_title: ['Друзья', 'Friends'],
@@ -234,6 +244,13 @@ const DICT: Record<string, [string, string]> = {
   fr_added_sent: ['Заявка отправлена', 'Request sent'],
   fr_stats_title: ['С друзьями', 'With friends'],
   fr_no_stats: ['Игр с друзьями пока не было', 'No games with friends yet'],
+  fr_persist_t: ['Данные не сохраняются', 'Data is not being saved'],
+  fr_persist_d: [
+    'На сервере не подключена база: друзья и переписка пропадут после простоя сервера. Подключите Deno KV: Settings → Databases → Provision Database, затем redeploy.',
+    'The server has no database attached: friends and chats will disappear after server idle. Attach Deno KV: Settings → Databases → Provision Database, then redeploy.',
+  ],
+  fr_remove_yes: ['Удалить', 'Remove'],
+  c_cancel: ['Отмена', 'Cancel'],
 
   // — статистика —
   stats_title: ['Статистика', 'Statistics'],
@@ -287,6 +304,9 @@ const DICT: Record<string, [string, string]> = {
     'Стереть всю статистику, достижения и сохранённую партию?',
     'Erase all stats, achievements and the saved game?',
   ],
+  set_reset_yes: ['Стереть', 'Erase'],
+  set_my_id: ['Ваш ID для друзей', 'Your friend ID'],
+  set_my_id_h: ['не меняется никогда — по нему вас найдут', 'never changes — friends find you by it'],
   set_reset_done: ['Прогресс сброшен', 'Progress reset'],
   set_reset_done_h: ['Чистый лист — новая ткань!', 'Clean slate — fresh fabric!'],
 
@@ -394,9 +414,13 @@ const DICT: Record<string, [string, string]> = {
   e_buttons: ['Пуговицы', 'Buttons'],
   e_tile: ['Плитка 7×7', '7×7 tile'],
   e_empty_cells: ['Пустые клетки ({n})', 'Empty cells ({n})'],
+  e_empty_cells_plain: ['Пустые клетки', 'Empty cells'],
   e_my_score: ['Ваш счёт', 'Your score'],
   e_score: ['Счёт', 'Score'],
   e_covered: ['закрыто {n}/81', 'covered {n}/81'],
+  e_compare_hint: ['Нажмите на полотно, чтобы сравнить', 'Tap a quilt to compare'],
+  e_compare_title: ['Сравнение полотен', 'Quilt comparison'],
+  e_close: ['Закрыть', 'Close'],
 
   // — хроника (структурированные коды) —
   log_start_you: ['Партия началась. Первым шьёте вы.', 'The game begins. You sew first.'],

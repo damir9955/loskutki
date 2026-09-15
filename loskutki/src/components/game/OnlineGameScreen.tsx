@@ -25,15 +25,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameScreen, type OnlineCtx } from './GameScreen';
 import type { GameEvent, GameState, MpRoomView, NetAction } from '@/lib/game/types';
 import type { MpSession } from '@/lib/net';
-import { mpControl, mpErrorKey, mpMove, mpOnNet, mpOnView, mpState, mpWsEnabled, mpWsReconnect } from '@/lib/net';
+import { mpChat, mpControl, mpErrorKey, mpMove, mpOnNet, mpOnView, mpState, mpWsEnabled, mpWsReconnect } from '@/lib/net';
 import { availablePatches, checkBuy } from '@/lib/game/engine';
 import { isLegalPlacement } from '@/lib/game/placement';
 import { BOARD_SIZE } from '@/lib/game/constants';
+import type { RoomChatMsgView } from '@/lib/game/types';
 import { t } from '@/lib/i18n';
 import { sound } from '@/lib/sound';
 import { useOnline } from '@/lib/useOnline';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const POLL_MS = 1500;
 /** без связи опрашиваем реже — не спамим, но и не бросаем партию */
@@ -100,6 +102,11 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
   const [netFail, setNetFail] = useState(false);
   /** зеркало netLost для цикла опроса (интервал при потере связи) */
   const netLostRef = useRef(false);
+  /** чат партии: сообщения с соперником прямо в игре */
+  const [chat, setChat] = useState<RoomChatMsgView[]>([]);
+  /** подтверждение выхода — В СТИЛЕ ИГРЫ (нативный confirm браузера
+   *  выдаёт веб-приложение: «Подтвердите действие на сайте») */
+  const [leaveAsk, setLeaveAsk] = useState(false);
 
   const seenVersion = useRef(-1);
   const seenGameSeq = useRef(-1);
@@ -180,6 +187,22 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
     [session.code, session.playerId],
   );
 
+  // ===== отправка сообщения в чат партии =====
+  const sendChat = useCallback(
+    async (text: string): Promise<boolean> => {
+      const clean = text.trim().slice(0, 300);
+      if (!clean) return false;
+      try {
+        const { view } = await mpChat({ code: session.code, playerId: session.playerId, text: clean });
+        applyViewRef.current(view, { fromSubmit: false });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [session.code, session.playerId],
+  );
+
   // ===== применение вида комнаты (стабильная функция) =====
   const applyView = useCallback(
     (view: MpRoomView, opts: { fromSubmit: boolean }) => {
@@ -213,6 +236,9 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         if (view.version > seenVersion.current) seenVersion.current = view.version;
 
         if (view.state) setGame(view.state);
+
+        // чат партии приезжает в каждом виде — обновляем при новых версиях
+        if (view.chat) setChat(view.chat);
 
         // события ходов: свои приходят из submit (там и проигрываются),
         // чужие — poll'ом: показываем через remoteEvents один раз
@@ -262,9 +288,11 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
         submit,
         remoteEvents: remoteRef.current.events,
         remoteEventsId: remoteRef.current.id,
+        chat,
+        sendChat,
       });
     },
-    [toast, submit],
+    [toast, submit, chat, sendChat],
   );
 
   // флаг «ход в полёте» в онлайн-контексте — обновляем сразу, не дожидаясь
@@ -411,7 +439,11 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
   // ===== выход из партии =====
   const doLeave = useCallback(
     (confirmFirst: boolean) => {
-      if (confirmFirst && !window.confirm(t('mp_leave_confirm'))) return;
+      // подтверждение — только внутри партии (финал не переспрашивает)
+      if (confirmFirst) {
+        setLeaveAsk(true);
+        return;
+      }
       void mpControl({ code: session.code, playerId: session.playerId, op: 'leave' }).catch(() => {
         /* комната могла закрыться */
       });
@@ -502,6 +534,22 @@ export function OnlineGameScreen({ session, onExit, onOpenRules }: OnlineGameScr
           </div>
         </div>
       )}
+      {/* подтверждение выхода — диалог В СТИЛЕ ИГРЫ (не браузерный!) */}
+      <ConfirmDialog
+        open={leaveAsk}
+        title={t('mp_leave_confirm')}
+        confirmText={t('mp_leave_yes')}
+        cancelText={t('mp_leave_no')}
+        onConfirm={() => {
+          setLeaveAsk(false);
+          void mpControl({ code: session.code, playerId: session.playerId, op: 'leave' }).catch(() => {
+            /* комната могла закрыться */
+          });
+          sound.tap();
+          onExit('user');
+        }}
+        onCancel={() => setLeaveAsk(false)}
+      />
       <GameScreen
         key={`online-${gameSeq}`}
         state={game}

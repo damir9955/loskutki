@@ -54,6 +54,8 @@
     "scripts/test-friends.ts",
     "scripts/test-quick-uid.ts",
     "scripts/test-invite-ingame.ts",
+    "scripts/test-roomchat-ownroom.ts",
+    "scripts/kv-friends-restart-test.ts",
     "scripts/debug-view.ts",
     "scripts/debug-fr-snap.ts"
   ]

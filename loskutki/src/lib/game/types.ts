@@ -105,12 +105,23 @@ export interface NetAction {
   c?: number;
 }
 
+/** сообщение чата партии (флаг «моё» уже посчитан под зрителя) */
+export interface RoomChatMsgView {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+  mine: boolean;
+}
+
 export interface MpRoomView {
   code: string;
   status: 'waiting' | 'playing' | 'finished' | 'abandoned';
   isPublic: boolean;
   mySeat: 0 | 1;
   me: { name: string; avatar: string; connected: boolean };
+  /** чат партии — переписка с соперником прямо в игре */
+  chat?: RoomChatMsgView[];
   foe: { name: string; avatar: string; connected: boolean; left: boolean; uid?: string | null } | null;
   wins: [number, number];
   rematchMe: boolean;

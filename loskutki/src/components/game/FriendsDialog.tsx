@@ -50,6 +50,8 @@ import {
 } from '@/lib/friends';
 import { loadStore, type FriendFoeStat } from '@/lib/storage';
 import { loadProfile, normalizeFriendCode } from '@/lib/net';
+import { ConfirmDialog } from './ConfirmDialog';
+import { DatabaseZap } from 'lucide-react';
 
 const INVITE_TTL_MS = 60_000;
 
@@ -81,6 +83,8 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
   const [chatText, setChatText] = useState('');
   const [now, setNow] = useState(Date.now());
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  /** подтверждение удаления друга — в стиле игры (не браузерный confirm) */
+  const [removeAsk, setRemoveAsk] = useState<{ uid: string; name: string } | null>(null);
 
   // пока открыт — освежаем присутствие/непрочитанное раз в 8с
   useEffect(() => {
@@ -198,9 +202,7 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
 
   const doRemove = (uid: string, name: string) => {
     sound.tap();
-    if (confirm(t('fr_remove_confirm', { name }))) {
-      void frRemove(uid);
-    }
+    setRemoveAsk({ uid, name });
   };
 
   const sendMsg = async () => {
@@ -321,6 +323,17 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
           </div>
         ) : (
           <div className="space-y-3">
+            {/* на сервере не подключена база — данные не переживут простой:
+                честно предупреждаем (и как починить) */}
+            {fr.ready && !fr.persist && (
+              <div className="flex items-start gap-2.5 rounded-xl border-2 border-[#C33A2F]/45 bg-[#C33A2F]/8 p-3">
+                <DatabaseZap className="mt-0.5 h-5 w-5 shrink-0 text-[#8f2a20]" />
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-extrabold text-foreground">{t('fr_persist_t')}</div>
+                  <div className="mt-0.5 text-[11.5px] font-semibold text-muted-foreground">{t('fr_persist_d')}</div>
+                </div>
+              </div>
+            )}
             {/* Мой ID + добавить по ID */}
             <div className="stitched-card p-3.5">
               <div className="flex items-center justify-between gap-2">
@@ -348,9 +361,11 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
               <div className="mt-3 flex items-center gap-2">
                 <input
                   value={addCode}
-                  onChange={(e) =>
-                    setAddCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 9))
-                  }
+                  onChange={(e) => {
+                    // автотире: ввод «5KT3Z999» сам превращается в «5KT3-Z999»
+                    const raw = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+                    setAddCode(raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void doAdd();
                   }}
@@ -528,6 +543,19 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
           </div>
         )}
       </DialogContent>
+      {/* подтверждение удаления — в стиле игры */}
+      <ConfirmDialog
+        open={removeAsk !== null}
+        title={t('fr_remove_confirm', { name: removeAsk?.name ?? '' })}
+        confirmText={t('fr_remove_yes')}
+        cancelText={t('c_cancel')}
+        trash
+        onConfirm={() => {
+          if (removeAsk) void frRemove(removeAsk.uid);
+          setRemoveAsk(null);
+        }}
+        onCancel={() => setRemoveAsk(null)}
+      />
     </Dialog>
   );
 }

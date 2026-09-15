@@ -9,8 +9,10 @@ import {
   Check,
   FlipHorizontal,
   Lightbulb,
+  MessageCircle,
   Pause,
   RotateCw,
+  Send,
   X,
 } from 'lucide-react';
 import {
@@ -33,7 +35,7 @@ import {
 import { isLegalPlacement, mirroredOrientation, rotatedOrientation, orientationsFor } from '@/lib/game/placement';
 import { decideBotAction, decideLeatherCell, suggestPlacement, suggestForHuman } from '@/lib/game/bot';
 import { dailyNumber } from '@/lib/game/rng';
-import type { GameEvent, GameState } from '@/lib/game/types';
+import type { GameEvent, GameState, RoomChatMsgView } from '@/lib/game/types';
 import {
   achDesc,
   achTitle,
@@ -115,6 +117,10 @@ export interface OnlineCtx {
   /** события чужого хода (пришли poll'ом) — проиграть один раз */
   remoteEvents: GameEvent[] | null;
   remoteEventsId: number;
+  /** чат партии: переписка с соперником прямо в игре (без дружбы —
+   *  живёт, пока жива комната) */
+  chat?: RoomChatMsgView[];
+  sendChat?: (text: string) => Promise<boolean>;
 }
 
 export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, online }: GameScreenProps) {
@@ -139,6 +145,15 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const [dragChip, setDragChip] = useState<{ x: number; y: number; patchId: number; marketIndex: 0 | 1 | 2 } | null>(null);
   /** лоскуток из ленты «дальше в пути» — открыта карточка с данными */
   const [ribbonDetail, setRibbonDetail] = useState<number | null>(null);
+  /** чат с соперником (онлайн-партия): шторка + непрочитанные */
+  const [showChat, setShowChat] = useState(false);
+  const [chatText, setChatText] = useState('');
+  const [chatSeenAt, setChatSeenAt] = useState(() => Date.now());
+  // партия завершена — шторку чата закрываем: она не должна перекрывать
+  // финальный экран (Реванш/В меню)
+  useEffect(() => {
+    if (state.phase === 'gameover') setShowChat(false);
+  }, [state.phase]);
 
   const botRunning = useRef(false);
   const recorded = useRef(false);
@@ -154,6 +169,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const persona = BOT_PERSONAS[state.botLevel];
   /** онлайн: соперник — живой человек из комнаты (имя/аватар из повёрнутого состояния) */
   const isOnline = state.mode === 'online' && !!online;
+  /** непрочитанные сообщения чата (пока шторка закрыта) */
+  const chatUnread =
+    isOnline && !showChat
+      ? (online?.chat ?? []).filter((m) => !m.mine && m.at > chatSeenAt).length
+      : 0;
   const foeName = isOnline && online ? online.opponent.name : personaName(lang, state.botLevel);
   const foeAvatar = isOnline && online ? avatarUrl(online.opponent.avatar) : null;
   const foeSub = isOnline && online
@@ -736,6 +756,28 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             </div>
           </div>
           <div className="flex gap-1">
+            {/* чат с соперником — только в онлайн-партии */}
+            {isOnline && (
+              <button
+                type="button"
+                onClick={() => {
+                  sound.tap();
+                  setChatSeenAt(Date.now());
+                  setShowChat(true);
+                }}
+                className={`btn-cloth relative flex items-center justify-center rounded-xl ${
+                  bigPort ? 'h-10 w-10' : 'h-8 w-8'
+                }`}
+                aria-label={t('mp_chat_title')}
+              >
+                <MessageCircle className={bigPort ? 'h-5 w-5' : 'h-4 w-4'} />
+                {chatUnread > 0 && (
+                  <span className="pop-in absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-card bg-[#C33A2F] px-0.5 text-[9px] font-extrabold text-white">
+                    {chatUnread > 9 ? '9+' : chatUnread}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -1234,6 +1276,24 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
         </div>
       )}
 
+      {/* Чат с соперником (онлайн-партия) */}
+      {isOnline && online && (
+        <InGameChatSheet
+          open={showChat}
+          onOpenChange={(v) => {
+            setShowChat(v);
+            if (v) setChatSeenAt(Date.now());
+          }}
+          foeName={foeName}
+          foeAvatar={foeAvatar}
+          foeUid={online.opponent.uid ?? null}
+          chat={online.chat ?? []}
+          sendChat={online.sendChat}
+          text={chatText}
+          onText={setChatText}
+        />
+      )}
+
       {/* Финал */}
       {state.phase === 'gameover' && endedShown && (
         <EndScreen
@@ -1373,5 +1433,115 @@ function FoeFriendButton({ uid, foeName }: { uid: string; foeName: string }) {
       {sent ? <Check className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
       {sent ? t('fr_outgoing') : `${foeName} — ${t('fr_add_friend')}`}
     </button>
+  );
+}
+
+/** Чат с соперником ПРЯМО В ПАРТИИ: шторка снизу с пузырями сообщений.
+ *  Работает БЕЗ дружбы (живёт, пока жива комната) + заметная кнопка
+ *  «добавить в друзья» — заявка по ID соперника одним тапом. */
+function InGameChatSheet({
+  open,
+  onOpenChange,
+  foeName,
+  foeAvatar,
+  foeUid,
+  chat,
+  sendChat,
+  text,
+  onText,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  foeName: string;
+  foeAvatar: string | null;
+  foeUid: string | null;
+  chat: RoomChatMsgView[];
+  sendChat?: (text: string) => Promise<boolean>;
+  text: string;
+  onText: (v: string) => void;
+}) {
+  const { toast } = useToast();
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const lang = useLang();
+  const locale = lang === 'en' ? 'en-US' : 'ru-RU';
+
+  useEffect(() => {
+    if (open) endRef.current?.scrollIntoView({ block: 'end' });
+  }, [open, chat.length]);
+
+  const send = async () => {
+    const clean = text.trim();
+    if (!clean || !sendChat) return;
+    onText('');
+    const ok = await sendChat(clean);
+    if (!ok) toast({ title: t('mp_net') });
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="flex max-h-[78svh] flex-col rounded-t-3xl p-0"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <SheetHeader className="shrink-0 border-b border-border px-4 py-3">
+          <SheetTitle className="flex items-center gap-2.5 font-display text-[19px]">
+            {foeAvatar && <Portrait src={foeAvatar} size={32} alt={foeName} />}
+            <span className="min-w-0 flex-1 truncate">{t('mp_chat_title')}</span>
+            <MessageCircle className="h-5 w-5 shrink-0 text-primary" />
+          </SheetTitle>
+          <div className="text-[11.5px] font-bold text-muted-foreground">{foeName}</div>
+        </SheetHeader>
+        <div className="nice-scroll min-h-[140px] flex-1 space-y-2 overflow-y-auto px-4 py-3">
+          {chat.length === 0 && (
+            <div className="mt-4 text-center text-[13px] font-semibold text-muted-foreground">
+              {t('mp_chat_empty')}
+            </div>
+          )}
+          {chat.map((m) => (
+            <div key={m.id} className={`flex ${m.mine ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[78%] rounded-2xl px-3 py-2 text-[14px] font-semibold shadow-sm ${
+                  m.mine
+                    ? 'rounded-br-md border border-[#5B7E9E]/40 bg-[#5B7E9E]/15 text-foreground'
+                    : 'rounded-bl-md border border-border bg-card text-foreground'
+                }`}
+              >
+                <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                <div className="mt-0.5 text-right text-[9.5px] font-bold text-muted-foreground/80">
+                  {new Date(m.at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
+        <div className="shrink-0 border-t border-border px-3 py-2.5 pb-[max(env(safe-area-inset-bottom),10px)]">
+          <div className="flex items-center gap-2">
+            <input
+              value={text}
+              onChange={(e) => onText(e.target.value.slice(0, 300))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void send();
+              }}
+              placeholder={t('mp_chat_ph')}
+              maxLength={300}
+              className="min-w-0 flex-1 rounded-xl border-2 border-border bg-card px-3 py-2.5 text-[15px] font-semibold text-foreground outline-none focus:border-primary/60"
+            />
+            <button
+              type="button"
+              disabled={!text.trim()}
+              onClick={() => void send()}
+              className="btn-wood flex h-11 w-11 shrink-0 items-center justify-center rounded-xl p-0"
+              aria-label={t('fr_send')}
+            >
+              <Send className="h-5 w-5" />
+            </button>
+          </div>
+          {/* добавить соперника в друзья — заявка одним тапом прямо из чата */}
+          {foeUid && <FoeFriendButton uid={foeUid} foeName={foeName} />}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

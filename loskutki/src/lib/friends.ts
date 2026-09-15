@@ -60,6 +60,9 @@ export interface FriendsState {
   ready: boolean;
   /** доступен ли раздел (нужен WS-режим) */
   available: boolean;
+  /** сервер хранит друзей в базе (Deno KV): false — данные живут
+   *  только до перезапуска сервера (клиент показывает предупреждение) */
+  persist: boolean;
   /** мой ID для друзей (отформатированный XXXX-XXXX) */
   code: string;
   friends: FriendInfo[];
@@ -86,6 +89,7 @@ const INVITE_TTL_MS = 60_000;
 const EMPTY: FriendsState = {
   ready: false,
   available: false,
+  persist: true,
   code: '',
   friends: [],
   requests: [],
@@ -243,12 +247,18 @@ let helloTimer: ReturnType<typeof setTimeout> | null = null;
 async function sendHello(profile: MpProfile): Promise<void> {
   if (!wsEnabled()) return;
   try {
-    const r = await getWs().request<{ snapshot?: FrSnapshotWire }>('hello', {
+    const r = await getWs().request<{ snapshot?: FrSnapshotWire; persist?: boolean }>('hello', {
       uid: profile.uid,
       name: profile.name,
       avatar: profile.avatar,
     });
     applySnapshot(r.snapshot);
+    // persist=false — на сервере не подключена база: друзья живут только
+    // до перезапуска изолята (предупреждение в разделе друзей)
+    if (typeof r.persist === 'boolean' && r.persist !== state.persist) {
+      state = { ...state, persist: r.persist };
+      emit();
+    }
   } catch {
     // сеть моргнула — onStatus переподключит и повторит hello
   }
@@ -423,8 +433,12 @@ export async function frInviteDecline(from: string): Promise<void> {
 export async function frSync(): Promise<void> {
   if (!wsEnabled()) return;
   try {
-    const r = await getWs().request<{ snapshot?: FrSnapshotWire }>('fr_sync', {});
+    const r = await getWs().request<{ snapshot?: FrSnapshotWire; persist?: boolean }>('fr_sync', {});
     applySnapshot(r.snapshot);
+    if (typeof r.persist === 'boolean' && r.persist !== state.persist) {
+      state = { ...state, persist: r.persist };
+      emit();
+    }
   } catch { /* сеть — не критично */ }
 }
 

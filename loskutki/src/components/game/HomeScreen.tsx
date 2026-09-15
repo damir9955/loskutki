@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   BookOpen,
   BarChart3,
-  Heart,
+  UserRoundPlus,
   Settings2,
   ShieldCheck,
   Play,
@@ -42,9 +42,10 @@ import { dailyNumber } from '@/lib/game/rng';
 import { useOnline } from '@/lib/useOnline';
 import { APP_VERSION } from '@/lib/version';
 import { useFriends } from '@/lib/friends';
-import { mpJoin, mpListRooms, mpOnRooms, mpWsEnabled, type MpSession } from '@/lib/net';
+import { formatFriendCode, mpJoin, mpListRooms, mpOnRooms, mpWsEnabled, type MpSession } from '@/lib/net';
 import { WS_URL_OVERRIDE_KEY, wsUrl, type OpenRoomInfo } from '@/lib/ws';
 import { FriendsDialog } from './FriendsDialog';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
   achDesc,
   achTitle,
@@ -298,23 +299,23 @@ export function HomeScreen({
   const daily = store.daily[todayKey()];
   const resumeGame = store.currentGame ?? null;
 
-  // ===== баннер «кто-то ищет быструю игру» (снизу меню) =====
-  const [waiters, setWaiters] = useState<OpenRoomInfo[] | null>(null);
+  // ===== ОТКРЫТЫЕ КОМНАТЫ внизу главного меню (обновление живьём) =====
+  const [rooms, setRooms] = useState<OpenRoomInfo[] | null>(null);
   useEffect(() => {
     if (!online) {
-      setWaiters(null);
+      setRooms(null);
       return;
     }
     if (mpWsEnabled()) {
       // WS-режим: сервер сам рассылает список открытых комнат каждые ~3с
-      return mpOnRooms((rooms) => setWaiters(rooms ?? []));
+      return mpOnRooms((list) => setRooms(list ?? []));
     }
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      const rooms = await mpListRooms();
+      const list = await mpListRooms();
       if (stop) return;
-      setWaiters(rooms);
+      setRooms(list);
       timer = setTimeout(refresh, 6000);
     };
     void refresh();
@@ -324,9 +325,11 @@ export function HomeScreen({
     };
   }, [online]);
 
-  const quickWaiters = useMemo(
-    () => (waiters ?? []).filter((r) => r.quick && r.code !== session?.code).slice(0, 2),
-    [waiters, session?.code],
+  const myUid = useMemo(() => loadProfileForJoin().uid, []);
+  /** чужие комнаты (свою прячем — входить «сам к себе» нельзя) */
+  const openRooms = useMemo(
+    () => (rooms ?? []).filter((r) => r.code !== session?.code && (!myUid || r.hostUid !== myUid)),
+    [rooms, session?.code, myUid],
   );
 
   const joinWaiter = async (roomCode: string) => {
@@ -359,7 +362,8 @@ export function HomeScreen({
       {/* живая сцена-фон */}
       <MenuScene />
 
-      {/* небольшая отдельная кнопка «Друзья» с индикацией событий */}
+      {/* небольшая отдельная кнопка «Друзья» с индикацией событий.
+          Значок — «человек с плюсом»: сердечко было непонятно */}
       <button
         type="button"
         onClick={() => {
@@ -372,7 +376,7 @@ export function HomeScreen({
         }`}
         aria-label={t('fr_title')}
       >
-        <Heart className={`h-5.5 w-5.5 ${frBadge > 0 ? 'text-[#C33A2F]' : 'text-[#A6721F]'}`} fill={frBadge > 0 ? '#F3C1BA' : 'none'} />
+        <UserRoundPlus className={`h-5.5 w-5.5 ${frBadge > 0 ? 'text-[#C33A2F]' : 'text-primary'}`} />
         {frBadge > 0 && (
           <span className="pop-in absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-card bg-[#C33A2F] px-1 text-[10.5px] font-extrabold text-white">
             {frBadge > 99 ? '99+' : frBadge}
@@ -380,20 +384,20 @@ export function HomeScreen({
         )}
       </button>
 
-      {/* шапка: верёвка + логотип + заголовок */}
+      {/* шапка: верёвка + логотип + заголовок (крупно — «жилое» меню) */}
       <div className="relative z-10 flex w-full flex-col items-center">
         <Clothesline />
         <div className="logo-float pop-in relative">
-          <LogoMark size={76} />
+          <LogoMark size={92} />
         </div>
         <h1
-          className="font-display title-stitch mt-1.5 text-[36px] leading-none text-foreground md:text-[42px]"
+          className="font-display title-stitch mt-2 text-[40px] leading-none text-foreground md:text-[46px]"
           style={{ letterSpacing: '0.04em' }}
         >
           {t('app_title')}
         </h1>
         <NeedleLine />
-        <p className="mt-0.5 text-[13px] font-bold tracking-wide text-muted-foreground md:text-[14px]">
+        <p className="mt-1 text-[13.5px] font-bold tracking-wide text-muted-foreground md:text-[14.5px]">
           {t('app_subtitle')}
         </p>
       </div>
@@ -424,18 +428,18 @@ export function HomeScreen({
         </button>
       )}
 
-      {/* Основные кнопки: на планшете — карточки в ряд */}
-      <div className="relative z-10 w-full space-y-2 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
+      {/* Основные кнопки: крупно, на планшете — карточки в ряд */}
+      <div className="relative z-10 w-full space-y-2.5 md:grid md:grid-cols-3 md:items-stretch md:gap-3 md:space-y-0">
         <Button
           size="lg"
-          className="btn-wood h-12 w-full rounded-2xl text-[16px] font-extrabold md:col-span-3 md:h-auto md:min-h-[64px] md:text-[18px]"
+          className="btn-wood h-14 w-full rounded-2xl text-[17px] font-extrabold md:col-span-3 md:h-auto md:min-h-[64px] md:text-[18px]"
           onClick={() => {
             sound.ensure();
             sound.tap();
             setPickOpen(true);
           }}
         >
-          <Play className="mr-2 h-5 w-5" />
+          <Play className="mr-2 h-5.5 w-5.5" />
           {t('home_play')}
         </Button>
 
@@ -451,17 +455,17 @@ export function HomeScreen({
             sound.tap();
             onQuickOnline();
           }}
-          className={`flex w-full items-center gap-2.5 rounded-2xl border-2 p-2.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
             online
               ? 'border-[#8AA06F]/60 bg-[#8AA06F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(70,100,40,.45)]'
               : 'border-border bg-muted/60 opacity-80'
           }`}
         >
-          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
-            <Zap className="h-5.5 w-5.5 text-[#4e6437]" fill="#cfe0b4" />
+          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/30">
+            <Zap className="h-6.5 w-6.5 text-[#4e6437]" fill="#cfe0b4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[14.5px] font-extrabold text-foreground">
+            <div className="flex items-center gap-2 text-[15.5px] font-extrabold text-foreground">
               {t('home_quick')}
               {online ? (
                 <span className="flex shrink-0 items-center gap-1">
@@ -473,7 +477,7 @@ export function HomeScreen({
                 </span>
               )}
             </div>
-            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">{t('home_quick_h')}</div>
+            <div className="truncate text-[12px] font-semibold text-muted-foreground">{t('home_quick_h')}</div>
           </div>
         </button>
 
@@ -489,14 +493,14 @@ export function HomeScreen({
             sound.tap();
             onOnline();
           }}
-          className="flex w-full items-center gap-2.5 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-2.5 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+          className="flex w-full items-center gap-3 rounded-2xl border-2 border-[#5B7E9E]/55 bg-[#5B7E9E]/12 p-3 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(50,70,100,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
-            <Users className="h-5.5 w-5.5 text-[#3D5A77]" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#5B7E9E]/25">
+            <Users className="h-6.5 w-6.5 text-[#3D5A77]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14.5px] font-extrabold text-foreground">{t('mp_title')}</div>
-            <div className="truncate text-[11.5px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
+            <div className="text-[15.5px] font-extrabold text-foreground">{t('mp_title')}</div>
+            <div className="truncate text-[12px] font-semibold text-muted-foreground">{t('mp_desc')}</div>
           </div>
         </button>
 
@@ -517,17 +521,17 @@ export function HomeScreen({
             }
             onDaily();
           }}
-          className={`flex w-full items-center gap-2.5 rounded-2xl border-2 p-2.5 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+          className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3 text-left transition-all hover:-translate-y-0.5 active:translate-y-0 ${
             daily
               ? 'border-border bg-muted/60 opacity-80'
               : 'border-[#D9A13F]/60 bg-[#D9A13F]/12 shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-8px_rgba(120,80,20,.45)]'
           }`}
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
-            <CalendarDays className="h-5.5 w-5.5 text-[#A6721F]" />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#D9A13F]/25">
+            <CalendarDays className="h-6.5 w-6.5 text-[#A6721F]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 text-[14.5px] font-extrabold text-foreground">
+            <div className="flex items-center gap-1.5 text-[15.5px] font-extrabold text-foreground">
               {t('home_daily', { n: dailyNumber(new Date()) })}
               <Sparkles className="h-3.5 w-3.5 text-[#A6721F]" />
             </div>
@@ -545,38 +549,60 @@ export function HomeScreen({
 
       <div className="min-h-2 flex-1" />
 
-      {/* снизу в меню: кто-то ищет быструю игру — можно сразу войти */}
-      {online && quickWaiters.length > 0 && (
-        <div className="pop-in relative z-10 mb-2 w-full space-y-1.5">
-          {quickWaiters.map((w) => (
-            <button
-              key={w.code}
-              type="button"
-              disabled={busyRoom}
-              onClick={() => void joinWaiter(w.code)}
-              className="stitched-card flex w-full items-center gap-2.5 border-[#8AA06F]/50 bg-[#8AA06F]/10 p-2 text-left transition-transform hover:-translate-y-0.5 active:translate-y-0"
-            >
-              <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/25">
-                <Portrait src={avatarUrl(w.hostAvatar)} size={30} alt={w.hostName} />
-                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#8AA06F] text-white">
-                  <Zap className="h-2.5 w-2.5" fill="#fff" />
-                </span>
+      {/* ОТКРЫТЫЕ КОМНАТЫ — прямо в главном меню (снизу): подсвечены,
+          вход одним тапом; свою комнату не показываем («сам к себе» нельзя) */}
+      {online && (
+        <div className="relative z-10 mb-2 w-full">
+          <div className="mb-1.5 flex items-center gap-2 px-0.5">
+            <Users className="h-4 w-4 shrink-0 text-primary" />
+            <div className="text-[12.5px] font-extrabold uppercase tracking-wide text-foreground">
+              {t('home_rooms_title')}
+            </div>
+            {openRooms.length > 0 && (
+              <span className="pop-in flex shrink-0 items-center gap-1 rounded-full bg-[#8AA06F]/20 px-2 py-0.5 text-[10.5px] font-extrabold text-[#4e6437]">
+                <span className="dot-online" />
+                {openRooms.length}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] font-extrabold text-foreground">
-                  {t('home_waiting', { name: w.hostName })}
-                </span>
-                {quickWaiters.length > 1 && (
-                  <span className="block text-[11px] font-bold text-muted-foreground">
-                    {t('home_waiting_many', { n: quickWaiters.length })}
+            )}
+          </div>
+          {openRooms.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2 text-center text-[12px] font-bold text-muted-foreground">
+              {t('mp_none')}
+            </div>
+          ) : (
+            <div className="nice-scroll max-h-[152px] space-y-1.5 overflow-y-auto pb-1">
+              {openRooms.map((r) => (
+                <button
+                  key={r.code}
+                  type="button"
+                  disabled={busyRoom}
+                  onClick={() => void joinWaiter(r.code)}
+                  className="pop-in flex w-full items-center gap-2.5 rounded-2xl border-2 border-[#8AA06F]/60 bg-[#8AA06F]/10 p-2 text-left shadow-[inset_0_2px_0_rgba(255,255,255,.55),0_5px_12px_-8px_rgba(70,100,40,.5)] transition-all hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8AA06F]/25">
+                    <Portrait src={avatarUrl(r.hostAvatar)} size={32} alt={r.hostName} />
+                    {r.quick && (
+                      <span className="absolute -right-1 -top-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-[#8AA06F] text-white">
+                        <Zap className="h-2.5 w-2.5" fill="#fff" />
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <span className="btn-wood flex h-9 shrink-0 items-center rounded-xl px-3.5 text-[13px] font-extrabold text-white">
-                {t('home_waiting_join')}
-              </span>
-            </button>
-          ))}
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[14px] font-extrabold text-foreground">{r.hostName}</span>
+                      <span className="dot-online shrink-0" />
+                    </span>
+                    <span className="block truncate text-[11px] font-bold text-muted-foreground">
+                      {r.quick ? t('mp_room_quick') : t('home_waiting', { name: r.hostName })}
+                    </span>
+                  </span>
+                  <span className="btn-wood flex h-9 shrink-0 items-center rounded-xl px-3.5 text-[13px] font-extrabold text-white">
+                    {t('home_rooms_join')}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -894,6 +920,10 @@ function SettingsDialog({
   const { toast } = useToast();
   const lang = useLang();
   const [st, setSt] = useState(() => loadStore().settings);
+  /** подтверждение сброса — в стиле игры (не браузерный confirm) */
+  const [resetAsk, setResetAsk] = useState(false);
+  /** мой постоянный ID — виден всегда, никогда не меняется */
+  const myUid = useMemo(() => formatFriendCode(loadProfileForJoin().uid), []);
   const save = (patch: Partial<typeof st>) => {
     const next = { ...st, ...patch };
     setSt(next);
@@ -1049,21 +1079,47 @@ function SettingsDialog({
               </div>
             )}
           </div>
+          {/* мой постоянный ID для друзей — никогда не меняется
+              (сброс прогресса его НЕ трогает) */}
+          <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-border bg-card/60 p-2.5">
+            <div className="min-w-0">
+              <div className="text-[14px] font-extrabold">{t('set_my_id')}</div>
+              <div className="text-[11.5px] font-semibold text-muted-foreground">{t('set_my_id_h')}</div>
+            </div>
+            <div
+              className="shrink-0 font-display text-[19px] leading-none tracking-[0.12em] text-foreground"
+              style={{ textShadow: '0 2px 0 rgba(169,133,90,.25)' }}
+            >
+              {myUid}
+            </div>
+          </div>
           <div className="stitch-divider my-1" />
           <button
             type="button"
             className="w-full rounded-xl border-2 border-destructive/40 bg-destructive/8 py-2.5 text-[14.5px] font-extrabold text-destructive"
             onClick={() => {
-              if (confirm(t('set_reset_confirm'))) {
-                localStorage.removeItem('loskutki.v1');
-                sound.enabled = true;
-                setSt(loadStore().settings);
-                toast({ title: t('set_reset_done'), description: t('set_reset_done_h') });
-              }
+              sound.tap();
+              setResetAsk(true);
             }}
           >
             {t('set_reset')}
           </button>
+          {/* подтверждение сброса — в стиле игры */}
+          <ConfirmDialog
+            open={resetAsk}
+            title={t('set_reset_confirm')}
+            confirmText={t('set_reset_yes')}
+            cancelText={t('c_cancel')}
+            trash
+            onConfirm={() => {
+              setResetAsk(false);
+              localStorage.removeItem('loskutki.v1');
+              sound.enabled = true;
+              setSt(loadStore().settings);
+              toast({ title: t('set_reset_done'), description: t('set_reset_done_h') });
+            }}
+            onCancel={() => setResetAsk(false)}
+          />
           {/* политика конфиденциальности — ссылка для Google Play, открывается
               в новой вкладке и работает даже без установленной игры */}
           <a

@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Copy, Check, Heart, LogIn, Plus, RefreshCw, Users, Zap } from 'lucide-react';
+import { ArrowLeft, Copy, Check, LogIn, Plus, RefreshCw, UserRoundPlus, Users, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Portrait } from './MarketRow';
@@ -365,17 +365,27 @@ export function MultiplayerScreen({
     sound.ensure();
     sound.tap();
     try {
-      // уже есть живая комната? — вторую не создаём, возвращаемся в свою
+      let hadOld = false;
+      // уже есть живая комната?
       if (session) {
         try {
           const { view } = await mpState({ code: session.code, playerId: session.playerId });
           if (view.status === 'playing' || view.status === 'finished') {
+            // идёт/завершена партия — возвращаемся в неё, новую не создаём
             onPlaying(session);
             return;
           }
-          toast({ title: t('mp_have_room') });
-          setWaiting(true);
-          return;
+          // СТАРАЯ ЖДУЩАЯ КОМНАТА: «Создать комнату» = создать НОВУЮ.
+          // Раньше молча возвращали в старую — после обновления страницы
+          // получалось «создал комнату и попал сам к себе». Теперь старую
+          // честно закрываем и создаём свежую.
+          hadOld = true;
+          try {
+            await mpControl({ code: session.code, playerId: session.playerId, op: 'cancel' });
+          } catch {
+            /* комната могла уже закрыться */
+          }
+          onSessionChange(null);
         } catch {
           // сессия мёртвая (комната удалена) — чистим и создаём новую
           onSessionChange(null);
@@ -385,6 +395,7 @@ export function MultiplayerScreen({
       const s: MpSession = { playerId, code: roomCode, name, avatar: profile.avatar, isPublic };
       onSessionChange(s);
       setWaiting(true);
+      if (hadOld) toast({ title: t('mp_room_recreated') });
     } catch (e) {
       toast({ title: t(mpErrorKey((e as { code?: string })?.code ?? '')) });
     } finally {
@@ -650,7 +661,8 @@ export function MultiplayerScreen({
           <div className="font-display text-[21px] text-foreground">{t('mp_title')}</div>
           <div className="text-[11.5px] font-bold text-muted-foreground">{t('mp_desc')}</div>
         </div>
-        {/* Друзья: небольшая кнопка с индикацией событий */}
+        {/* Друзья: небольшая кнопка с индикацией событий (значок — «человек
+            с плюсом»: сердечко было непонятно) */}
         <button
           type="button"
           onClick={() => {
@@ -663,7 +675,7 @@ export function MultiplayerScreen({
           }`}
           aria-label={t('fr_title')}
         >
-          <Heart className={`h-4.5 w-4.5 ${frBadgeCount(fr) > 0 ? 'text-[#C33A2F]' : 'text-[#A6721F]'}`} fill={frBadgeCount(fr) > 0 ? '#F3C1BA' : 'none'} />
+          <UserRoundPlus className={`h-4.5 w-4.5 ${frBadgeCount(fr) > 0 ? 'text-[#C33A2F]' : 'text-primary'}`} />
           {frBadgeCount(fr) > 0 && (
             <span className="pop-in absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-card bg-[#C33A2F] px-0.5 text-[9px] font-extrabold text-white">
               {frBadgeCount(fr) > 99 ? '99+' : frBadgeCount(fr)}
@@ -819,10 +831,20 @@ export function MultiplayerScreen({
           </div>
         )}
         {openRooms?.map((r) => {
-          const mine = session?.code === r.code;
+          const mine = session?.code === r.code || (!!profile.uid && r.hostUid === profile.uid);
           return (
-            <div key={r.code} className="stitched-card flex items-center gap-2.5 p-2.5">
-              <Portrait src={avatarUrl(r.hostAvatar)} size={40} alt={r.hostName} />
+            <div
+              key={r.code}
+              className={`flex items-center gap-2.5 rounded-2xl border-2 p-2.5 shadow-[inset_0_2px_0_rgba(255,255,255,.55),0_5px_12px_-8px_rgba(70,100,40,.45)] transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+                mine
+                  ? 'border-[#D9A13F]/55 bg-[#D9A13F]/10'
+                  : 'border-[#8AA06F]/60 bg-[#8AA06F]/10'
+              }`}
+            >
+              <span className="relative shrink-0">
+                <Portrait src={avatarUrl(r.hostAvatar)} size={42} alt={r.hostName} />
+                {!mine && <span className="dot-online absolute -bottom-0.5 -right-0.5" />}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-[14.5px] font-extrabold text-foreground">{r.hostName}</span>
@@ -843,7 +865,7 @@ export function MultiplayerScreen({
               <Button
                 size="sm"
                 disabled={busy}
-                className="btn-cloth h-10 shrink-0 rounded-xl px-3.5 text-[13.5px] font-extrabold"
+                className={`${mine ? 'btn-cloth' : 'btn-wood text-white'} h-10 shrink-0 rounded-xl px-3.5 text-[13.5px] font-extrabold`}
                 onClick={() => void doJoinRoom(r.code)}
               >
                 {mine ? t('mp_return') : t('mp_join_btn')}

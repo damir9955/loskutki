@@ -25,6 +25,8 @@ export interface OpenRoomInfo {
   code: string;
   hostName: string;
   hostAvatar: string;
+  /** постоянный ID хоста — чтобы пометить/скрыть свою же комнату в списке */
+  hostUid?: string | null;
   createdAt: number;
   /** комната быстрого матча (создана автопоиском) — лобби показывает ⚡ */
   quick?: boolean;

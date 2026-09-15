@@ -154,6 +154,7 @@ function newRoom(code: string, host: MpPlayer, isPublic: boolean, quickHost = fa
     rematchGuest: false,
     wins: [0, 0],
     quickHost,
+    chat: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -269,6 +270,8 @@ function joinInternal(room: MpRoom, input: { name: string; avatar: string; playe
   // хост не может «войти» в собственную комнату как гость — иначе партия
   // начнётся против самого себя и друзья уже не смогут присоединиться
   if (typeof input.playerId === 'string' && input.playerId === room.host.id) throw 'ownroom';
+  // тот же игрок по постоянному ID (сессия потеряна) — тоже «сам к себе»
+  if (input.uid && room.host.uid && input.uid === room.host.uid) throw 'ownroom';
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
   if (room.host.leftAt !== null) throw 'gone';
   tick(room);
@@ -540,6 +543,14 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
     isPublic: room.isPublic,
     mySeat: seat,
     me: { name: me.name, avatar: me.avatar, connected: now - me.lastPoll < CONNECTED_MS },
+    // чат партии: каждому — с флагом «моё/чужое» (зритель всегда место 0)
+    chat: (room.chat ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      text: m.text,
+      at: m.at,
+      mine: m.seat === seat,
+    })),
     foe: foe
       ? {
           name: foe.name,
@@ -674,6 +685,23 @@ export async function roomMove(code: string, playerId: string, action: NetAction
   throw 'conflict';
 }
 
+/** сообщение в чат партии (для играющих; живёт, пока жива комната) */
+export async function roomChat(code: string, playerId: string, text: string): Promise<MpRoomView> {
+  const clean = text.trim().slice(0, 300);
+  if (clean.length < 1) throw 'badpayload';
+  await mutateRoom(code, (room) => {
+    const seat = seatOf(room, playerId);
+    if (seat === null) throw 'notfound';
+    const p = seat === 0 ? room.host : room.guest!;
+    room.chat = [
+      ...(room.chat ?? []),
+      { id: genId(), seat, name: p.name, text: clean, at: Date.now() } as import('./roomStore').RoomChatMsg,
+    ].slice(-60);
+    bumpVersion(room);
+  });
+  return roomState(code, playerId);
+}
+
 /** управление комнатой: leave | cancel | rematch */
 export async function roomControl(
   code: string,
@@ -706,7 +734,7 @@ export async function roomControl(
  *  «призраки» закрытых вкладок не попадают в поиск.
  *  Комнаты быстрого матча тоже публичные — помечаем quick: true,
  *  чтобы лобби показывало «⚡ быстрый матч» рядом с обычными. */
-export async function listRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>> {
+export async function listRooms(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; hostUid: string | null; createdAt: number; quick: boolean }>> {
   const store = getRoomStore();
   try {
     const stale = await store.staleRooms(WAITING_HOST_TTL_MS, ROOM_TTL_MS);
@@ -726,7 +754,7 @@ export async function listRooms(): Promise<Array<{ code: string; hostName: strin
     .filter((w) => w.room.guest === null && w.room.host.leftAt === null && now - w.room.host.lastPoll <= LIST_ALIVE_MS)
     .sort((a, b) => b.room.createdAt - a.room.createdAt)
     .slice(0, 30)
-    .map((w) => ({ code: w.room.code, hostName: w.room.host.name, hostAvatar: w.room.host.avatar, createdAt: w.room.createdAt, quick: w.room.quickHost === true }));
+    .map((w) => ({ code: w.room.code, hostName: w.room.host.name, hostAvatar: w.room.host.avatar, hostUid: w.room.host.uid ?? null, createdAt: w.room.createdAt, quick: w.room.quickHost === true }));
 }
 
 // ===== быстрый матч (автопоиск) =====

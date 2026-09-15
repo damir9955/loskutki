@@ -22,6 +22,16 @@ export interface MpPlayer {
   uid?: string | null;
 }
 
+/** сообщение чата партии (живёт, пока жива комната) */
+export interface RoomChatMsg {
+  id: string;
+  /** место отправителя: 0 = хост, 1 = гость */
+  seat: 0 | 1;
+  name: string;
+  text: string;
+  at: number;
+}
+
 export interface MpRoom {
   code: string;
   host: MpPlayer;
@@ -46,6 +56,8 @@ export interface MpRoom {
   wins: [number, number];
   /** комната создана автопоиском: хост ищет пару, пока в неё не войдут */
   quickHost: boolean;
+  /** чат партии (до 60 сообщений) */
+  chat: RoomChatMsg[];
   createdAt: number;
   updatedAt: number;
 }

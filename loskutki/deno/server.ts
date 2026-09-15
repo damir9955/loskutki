@@ -1,6 +1,19 @@
 /**
- * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy (v3.3.1).
+ * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy (v3.4.0).
  * ============================================================
+ *
+ * v3.4.0 — ЧАТ ПАРТИИ + ЗАЩИТА «САМ К СЕБЕ» + hostUid В ЛОББИ:
+ *   — новая команда 'chat' {code, playerId, text}: переписка с соперником
+ *     прямо в партии (без дружбы; живёт, пока жива комната, до 60
+ *     сообщений); вид комнаты теперь содержит chat[] с флагом «моё»;
+ *   — create/join пробрасывают uid игрока (добавление в друзья из матча
+ *     теперь работает: foe.uid больше не null);
+ *   — join в СОБСТВЕННУЮ комнату по uid отклоняется ('ownroom') — баг
+ *     «создал комнату после обновления страницы и попал сам к себе»;
+ *   — список открытых комнат содержит hostUid (клиент прячет свою);
+ *   — hello/fr_sync отвечают persist (подключена ли база Deno KV):
+ *     без базы игра честно предупреждает в разделе «Друзья»;
+ *   — health-страница без базы показывает красное предупреждение.
  *
  * v3.3.1 — ПОЧИНЕН ДЕПЛОЙ на console.deno.com: раньше этапы сборки
  * «Warm up» и «Register crons» падали, потому что HTTP-сервер
@@ -51,9 +64,10 @@
  *
  * Протокол (JSON по WebSocket):
  *   клиент → сервер: {ref, t:'create'|'join'|'state'|'move'|'control'|
- *     'quick'|'quick_cancel'|'rooms'|'ping'|'hello'|'fr_sync'|'fr_add'|
- *     'fr_accept'|'fr_decline'|'fr_remove'|'fr_msg'|'fr_read'|'fr_chat'|
- *     'fr_invite'|'fr_invite_accept'|'fr_invite_decline', ...} и {t:'pong', id}
+ *     'chat'|'quick'|'quick_cancel'|'rooms'|'ping'|'hello'|'fr_sync'|
+ *     'fr_add'|'fr_accept'|'fr_decline'|'fr_remove'|'fr_msg'|'fr_read'|
+ *     'fr_chat'|'fr_invite'|'fr_invite_accept'|'fr_invite_decline', ...}
+ *     и {t:'pong', id}
  *   сервер → клиент: {ref, ok:true|false, ...} — ответ на запрос,
  *     {t:'view', view} — мгновенный push состояния комнаты,
  *     {t:'rooms', rooms} — push списка открытых комнат лобби,
@@ -295,12 +309,23 @@ interface NetAction {
   c?: number;
 }
 
+/** сообщение чата партии в «повёрнутом» виде (mine — писал ли его я) */
+interface RoomChatView {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+  mine: boolean;
+}
+
 interface MpRoomView {
   code: string;
   status: 'waiting' | 'playing' | 'finished' | 'abandoned';
   isPublic: boolean;
   mySeat: 0 | 1;
   me: { name: string; avatar: string; connected: boolean };
+  /** чат партии (моё/чужое уже посчитано под зрителя) */
+  chat: RoomChatView[];
   foe: { name: string; avatar: string; connected: boolean; left: boolean; uid: string | null } | null;
   wins: [number, number];
   rematchMe: boolean;
@@ -829,6 +854,16 @@ interface MpPlayer {
   uid: string | null;
 }
 
+/** сообщение чата партии (живёт, пока жива комната) */
+interface RoomChatMsg {
+  id: string;
+  /** место отправителя: 0 = хост, 1 = гость */
+  seat: 0 | 1;
+  name: string;
+  text: string;
+  at: number;
+}
+
 interface MpRoom {
   code: string;
   host: MpPlayer;
@@ -853,6 +888,8 @@ interface MpRoom {
   wins: [number, number];
   /** комната создана автопоиском */
   quickHost: boolean;
+  /** чат партии (до ROOM_CHAT_CAP сообщений) */
+  chat: RoomChatMsg[];
   createdAt: number;
   updatedAt: number;
 }
@@ -884,6 +921,8 @@ function ownerSocketAlive(room: MpRoom, owner: number): boolean {
 }
 const ROOM_TTL_MS = 30 * 60_000; // брошенные партии чистим через 30 минут
 const WAITING_HOST_TTL_MS = 5 * 60_000; // ждущая комната без хоста живёт 5 минут
+const ROOM_CHAT_CAP = 60; // сообщений в чате партии (лимит значения KV ~64КБ)
+const ROOM_CHAT_TEXT_MAX = 300; // символов в сообщении чата партии
 const LIST_ALIVE_MS = 20_000; // в поиске показываем только живые комнаты
 const MAX_AUTO_TICKS = 80; // предохранитель цикла автопассов
 const OWNER_ABSENT_CAP_MS = 90_000; // дольше — автопасс просрочки
@@ -1003,6 +1042,7 @@ function newRoom(code: string, host: MpPlayer, isPublic: boolean, quickHost = fa
     rematchGuest: false,
     wins: [0, 0],
     quickHost,
+    chat: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -1280,6 +1320,9 @@ function seatGuest(room: MpRoom, pid: string, name: string, avatar: string, uid:
 /** внутренняя логика join (валидации + старт партии); возвращает id гостя */
 function joinInternal(room: MpRoom, input: { name: string; avatar: string; playerId?: unknown; uid?: string | null }): string {
   if (typeof input.playerId === 'string' && input.playerId === room.host.id) throw 'ownroom';
+  // тот же игрок по постоянному ID (сессия потеряна при перезагрузке,
+  // сессия стёрта, вход из другого браузера) — «сам к себе» не допускаем
+  if (input.uid && room.host.uid && input.uid === room.host.uid) throw 'ownroom';
   if (room.status !== 'waiting' || room.guest !== null) throw 'full';
   if (room.host.leftAt !== null) throw 'gone';
   tick(room);
@@ -1568,6 +1611,14 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
     isPublic: room.isPublic,
     mySeat: seat,
     me: { name: me.name, avatar: me.avatar, connected: now - me.lastPoll < CONNECTED_MS },
+    // чат партии: каждому — с флагом «моё/чужое» (зритель всегда место 0)
+    chat: (room.chat ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      text: m.text,
+      at: m.at,
+      mine: m.seat === seat,
+    })),
     foe: foe
       ? {
           name: foe.name,
@@ -1694,14 +1745,32 @@ export async function roomControlA(
   throw 'badpayload';
 }
 
+/** сообщение в чат партии (живёт, пока жива комната; для играющих) */
+export async function roomChatA(code: string, playerId: string, text: string): Promise<{ view: MpRoomView; room: MpRoom }> {
+  const clean = text.trim().slice(0, ROOM_CHAT_TEXT_MAX);
+  if (clean.length < 1) throw 'badpayload';
+  const out = await mutateRoom(code.trim().toUpperCase(), (room) => {
+    const seat = seatOf(room, playerId);
+    if (seat === null) throw 'notfound';
+    const p = seat === 0 ? room.host : room.guest!;
+    const msg: RoomChatMsg = { id: genId(), seat, name: p.name, text: clean, at: Date.now() };
+    room.chat = [...(room.chat ?? []), msg].slice(-ROOM_CHAT_CAP);
+    // версия растёт: клиенты считают вид «новым» и подтягивают чат;
+    // состояние партии при этом не меняется (events не подмешиваются)
+    bumpVersion(room);
+    return { result: viewFor(room, playerId) };
+  });
+  return { view: out.result, room: out.room };
+}
+
 /** Список ОТКРЫТЫХ комнат (только живые: хост был активен < 20с назад).
  *  Лобби — «косметика»: читаем из реплики KV (быстро и дёшево). */
-export async function listRoomsA(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>> {
+export async function listRoomsA(): Promise<Array<{ code: string; hostName: string; hostAvatar: string; hostUid: string | null; createdAt: number; quick: boolean }>> {
   const now = Date.now();
-  const out: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }> = [];
+  const out: Array<{ code: string; hostName: string; hostAvatar: string; hostUid: string | null; createdAt: number; quick: boolean }> = [];
   for (const { room: r } of await allRooms(false)) {
     if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null && now - r.host.lastPoll <= LIST_ALIVE_MS) {
-      out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, createdAt: r.createdAt, quick: r.quickHost === true });
+      out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, hostUid: r.host.uid, createdAt: r.createdAt, quick: r.quickHost === true });
     }
   }
   out.sort((a, b) => b.createdAt - a.createdAt);
@@ -2469,7 +2538,7 @@ function broadcastRoom(room: MpRoom): void {
 
 /** разослать список открытых комнат сокетам лобби (не в комнате) */
 async function pushRoomsA(): Promise<void> {
-  let list: Array<{ code: string; hostName: string; hostAvatar: string; createdAt: number; quick: boolean }>;
+  let list: Array<{ code: string; hostName: string; hostAvatar: string; hostUid: string | null; createdAt: number; quick: boolean }>;
   try {
     list = await listRoomsA();
   } catch {
@@ -2559,7 +2628,9 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
 
     switch (t) {
       case 'create': {
-        const res = await createRoomA({ name: msg.name, avatar: msg.avatar, isPublic: msg.isPublic });
+        // uid ОБЯЗАН пробрасываться: без него «добавить в друзья» из матча
+        // не работает (foe.uid === null) и нельзя поймать вход «сам к себе»
+        const res = await createRoomA({ name: msg.name, avatar: msg.avatar, isPublic: msg.isPublic, uid: msg.uid });
         attach(ctx, res.code, res.playerId);
         respond(ctx, ref, { ok: true, code: res.code, playerId: res.playerId });
         void pushRoomsA();
@@ -2567,7 +2638,7 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
       }
 
       case 'join': {
-        const res = await joinRoomA({ code: msg.code, name: msg.name, avatar: msg.avatar, playerId: msg.playerId });
+        const res = await joinRoomA({ code: msg.code, name: msg.name, avatar: msg.avatar, playerId: msg.playerId, uid: msg.uid });
         attach(ctx, res.code, res.playerId);
         respond(ctx, ref, { ok: true, code: res.code, playerId: res.playerId });
         broadcastRoom(res.room); // хост мгновенно видит старт партии
@@ -2593,6 +2664,16 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
         const { view, room } = await roomMoveA(str(msg.code), str(msg.playerId), msg.action as NetAction);
         respond(ctx, ref, { ok: true, view });
         broadcastRoom(room); // мгновенная доставка хода сопернику
+        notifyChan(room.code);
+        return;
+      }
+
+      case 'chat': {
+        // сообщение в чат партии (переписка с соперником прямо в игре,
+        // без обязательной дружбы — живёт, пока жива комната)
+        const { view, room } = await roomChatA(str(msg.code), str(msg.playerId), typeof msg.text === 'string' ? msg.text : '');
+        respond(ctx, ref, { ok: true, view });
+        broadcastRoom(room); // соперник получает сообщение мгновенно
         notifyChan(room.code);
         return;
       }
@@ -2673,14 +2754,16 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
         ctx.frName = name;
         ctx.frAvatar = cleanAvatar(msg.avatar);
         await touchUserA(uid, name, ctx.frAvatar);
-        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(uid) });
+        // persist: подключена ли база (Deno KV). Без неё друзья живут
+        // только до перезапуска изолята — клиент показывает предупреждение
+        respond(ctx, ref, { ok: true, persist: kv !== null, snapshot: await friendsSnapshotA(uid) });
         return;
       }
 
       case 'fr_sync': {
         if (!ctx.uid) throw 'badpayload';
         await touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
-        respond(ctx, ref, { ok: true, snapshot: await friendsSnapshotA(ctx.uid) });
+        respond(ctx, ref, { ok: true, persist: kv !== null, snapshot: await friendsSnapshotA(ctx.uid) });
         return;
       }
 
@@ -3118,11 +3201,11 @@ function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string
   const line = st
     ? `<p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
     <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
-    <p>Хранение: ${
-      st.kv
-        ? 'Deno KV — комнаты переживают перезапуск'
-        : 'память (перезапуск очистит комнаты). На Deno Deploy: Settings → Databases → Attach Database → Provision Database (Deno KV)'
-    }</p>`
+    <p>Хранение: ${st.kv ? 'Deno KV — комнаты и друзья переживают перезапуск' : 'память'}</p>
+    ${st.kv ? '' : `<div class="warn">⚠️ База данных не подключена: друзья, переписка и комнаты
+    будут теряться при каждом перезапуске сервера. Подключите:
+    Settings → Databases → Attach Database → Provision Database (Deno KV),
+    затем redeploy.</div>`}`
     : `<p>Сервер только что запустился — статистика появится через минуту.</p>`;
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -3139,6 +3222,8 @@ function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string
   p { margin: 6px 0; color: #C9BCA4; font-size: 15px; }
   .ok { display: inline-block; margin-top: 14px; padding: 8px 18px; border-radius: 999px;
         background: #4C7A3F; color: #fff; font-weight: 700; font-size: 14px; }
+  .warn { margin-top: 12px; padding: 10px 14px; border-radius: 12px; text-align: left;
+          background: #5A2A1E; border: 1px solid #B5432F; color: #FFD9CF; font-size: 13px; }
 </style>
 </head>
 <body>

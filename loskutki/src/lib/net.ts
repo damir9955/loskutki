@@ -33,6 +33,39 @@ export interface MpProfile {
 
 const SKEY = 'loskutki.mp.session.v1';
 const PKEY = 'loskutki.mp.profile.v1';
+/** Постоянный ID игрока живёт в ОТДЕЛЬНОМ ключе: он не должен меняться
+ *  НИКОГДА — даже если профиль пересоздан (сброс, переустановка локальных
+ *  данных профиля). Друзья привязаны к этому ID — смена ID = потеря друзей. */
+const UIDKEY = 'loskutki.uid.v1';
+
+/** прочитать стабильный ID (или сгенерировать и ЗАПОМНИТЬ навсегда).
+ *  Порядок: отдельный ключ → миграция uid из профиля (старые установки,
+ *  друзья уже привязаны к нему) → генерация нового с записью навсегда. */
+function stableUid(): string {
+  if (typeof window === 'undefined') return '';
+  let uid = '';
+  try {
+    uid = normalizeFriendCode(localStorage.getItem(UIDKEY) ?? '');
+  } catch {
+    uid = '';
+  }
+  if (!uid) {
+    try {
+      const raw = localStorage.getItem(PKEY);
+      if (raw) {
+        const p = JSON.parse(raw) as Partial<MpProfile>;
+        uid = normalizeFriendCode(p?.uid ?? '');
+      }
+    } catch {
+      uid = '';
+    }
+  }
+  if (!uid) uid = genUid();
+  try {
+    localStorage.setItem(UIDKEY, uid);
+  } catch { /* ignore */ }
+  return uid;
+}
 
 /** алфавит кода друга (как коды комнат — без похожих знаков) */
 const UID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -87,15 +120,17 @@ export function saveSession(s: MpSession | null) {
 
 export function loadProfile(): MpProfile {
   if (typeof window === 'undefined') return { name: '', avatar: 'ann', uid: '' };
+  // постоянный ID — ИЗ ОТДЕЛЬНОГО КЛЮЧА: переживает любые пересоздания
+  // профиля и всегда один и тот же (просьба пользователя: «id у всех
+  // оставался всегда 1 и тот же»)
+  const uid = stableUid();
   try {
     const raw = localStorage.getItem(PKEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<MpProfile>;
       if (typeof p?.name === 'string' && typeof p?.avatar === 'string') {
-        // апгрейд старого профиля: постоянный ID для друзей (генерируем раз)
-        const uid = normalizeFriendCode(p.uid ?? '') || genUid();
         const full: MpProfile = { name: p.name, avatar: p.avatar, uid };
-        if (uid !== p.uid) {
+        if (p.uid !== uid) {
           try {
             localStorage.setItem(PKEY, JSON.stringify(full));
           } catch { /* ignore */ }
@@ -111,7 +146,7 @@ export function loadProfile(): MpProfile {
   const def: MpProfile = {
     name: `Игрок ${Math.floor(1000 + Math.random() * 9000)}`,
     avatar: 'ann',
-    uid: genUid(),
+    uid,
   };
   try {
     localStorage.setItem(PKEY, JSON.stringify(def));
@@ -221,6 +256,14 @@ export async function mpControl(input: { code: string; playerId: string; op: 'le
     return { started: r.started };
   }
   return post<{ started?: boolean }>('/api/mp/control', input);
+}
+
+/** сообщение в чат партии — переписка с соперником прямо в игре */
+export async function mpChat(input: { code: string; playerId: string; text: string }): Promise<{ view: MpRoomView }> {
+  if (wsEnabled()) {
+    return getWs().request<{ view: MpRoomView }>('chat', input, 8000);
+  }
+  return post<{ view: MpRoomView }>('/api/mp/chat', input);
 }
 
 /** Быстрый матч (автопоиск): пару с другим искателем или первой открытой комнатой */

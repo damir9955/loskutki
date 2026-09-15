@@ -119,6 +119,21 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Маскировка под нативное приложение: текст не выделяется тапом —
+       не всплывает браузерное меню «Копировать | Поиск». Поля ввода
+       исключены ниже. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  /* там, где вводят текст, выделение обязательно */
+  input,
+  textarea,
+  [contenteditable='true'],
+  [contenteditable=''] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
   }
   body {
     @apply bg-background text-foreground;

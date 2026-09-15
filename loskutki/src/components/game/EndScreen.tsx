@@ -6,6 +6,7 @@ import { personaName, t, useLang } from '@/lib/i18n';
 import { MiniQuilt } from './QuiltBoard';
 import { BotAvatar, CoinIcon, Portrait } from './MarketRow';
 import { sound } from '@/lib/sound';
+import { X } from 'lucide-react';
 
 const CONFETTI_COLORS = ['#C0603A', '#3E7C74', '#D9A13F', '#8E5A79', '#8AA06F', '#EFE0BC'];
 
@@ -44,24 +45,6 @@ function Confetti({ n = 70 }: { n?: number }) {
   );
 }
 
-/** Счёт-касса с анимацией */
-function CountUp({ to, sign = 1 }: { to: number; sign?: number }) {
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    const start = performance.now();
-    const dur = 700;
-    let raf = 0;
-    const tick = (t: number) => {
-      const k = Math.min(1, (t - start) / dur);
-      setV(Math.round(to * k * sign));
-      if (k < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [to, sign]);
-  return <>{v > 0 ? '+' : ''}{v}</>;
-}
-
 export function EndScreen({
   state,
   opponent,
@@ -77,6 +60,8 @@ export function EndScreen({
   const lang = useLang();
   const result = state.result;
   const [shown, setShown] = useState(false);
+  /** оверлей сравнения: оба полотна крупно, моё сверху, соперника снизу */
+  const [compare, setCompare] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setShown(true), 350);
     if (result?.winner === 0) sound.win();
@@ -117,12 +102,20 @@ export function EndScreen({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          {/* Игрок */}
+          {/* Игрок — тап по полотну открывает сравнение обоих полотен */}
           <div className="rounded-xl border-2 border-primary/40 bg-primary/8 p-2.5">
             <div className="mb-1.5 text-center text-[12px] font-extrabold tracking-wide text-primary uppercase">{t('e_you')}</div>
-            <div className="mx-auto w-full">
+            <button
+              type="button"
+              onClick={() => {
+                sound.tap();
+                setCompare(true);
+              }}
+              className="mx-auto w-full transition-transform hover:-translate-y-0.5 active:translate-y-0"
+              aria-label={t('e_compare_title')}
+            >
               <MiniQuilt board={state.players[0].board} className="mx-auto w-full rounded-lg" />
-            </div>
+            </button>
             <ScoreList s={my} mine delay={500} />
           </div>
           {/* Бот */}
@@ -131,12 +124,26 @@ export function EndScreen({
               {opponent ? <Portrait src={opponent.avatar} size={18} /> : <BotAvatar level={state.botLevel} size={18} />}
               {botName}
             </div>
-            <MiniQuilt board={state.players[1].board} className="mx-auto w-full rounded-lg" />
+            <button
+              type="button"
+              onClick={() => {
+                sound.tap();
+                setCompare(true);
+              }}
+              className="mx-auto w-full transition-transform hover:-translate-y-0.5 active:translate-y-0"
+              aria-label={t('e_compare_title')}
+            >
+              <MiniQuilt board={state.players[1].board} className="mx-auto w-full rounded-lg" />
+            </button>
             <ScoreList s={bot} delay={700} />
           </div>
         </div>
 
-        <div className="mt-3 rounded-xl px-3 py-2.5 text-center">
+        <div className="mt-1 text-center text-[10.5px] font-bold text-muted-foreground/80">
+          {t('e_compare_hint')}
+        </div>
+
+        <div className="mt-2 rounded-xl px-3 py-2.5 text-center">
           <span className="text-[17px] font-extrabold text-foreground">
             {t('e_total')}
             <span className={won ? 'text-primary' : 'text-[#8a5a3a]'}>
@@ -163,10 +170,68 @@ export function EndScreen({
           </button>
         </div>
       </div>
+
+      {/* ===== СРАВНЕНИЕ ПОЛОТЕН: оба крупно, моё сверху, соперника снизу ===== */}
+      {compare && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-[#2B2118]/92 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('e_compare_title')}
+          onClick={() => setCompare(false)}
+        >
+          <div className="flex shrink-0 items-center justify-between px-4 pb-1.5 pt-[max(env(safe-area-inset-top),16px)]">
+            <div className="font-display text-[20px] text-foreground">{t('e_compare_title')}</div>
+            <button
+              type="button"
+              onClick={() => setCompare(false)}
+              className="btn-cloth flex h-10 w-10 items-center justify-center rounded-xl"
+              aria-label={t('e_close')}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div
+            className="nice-scroll flex flex-1 flex-col items-center gap-4 overflow-y-auto px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* моё полотно — сверху */}
+            <div className="w-full max-w-[min(92vw,430px)]">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-[14px] font-extrabold text-primary uppercase tracking-wide">{t('e_you')}</span>
+                <span className={`text-[15px] font-extrabold ${my.total >= bot.total ? 'text-primary' : 'text-foreground/70'}`}>
+                  {my.total > 0 ? '+' : ''}{my.total}
+                </span>
+              </div>
+              <MiniQuilt board={state.players[0].board} className="w-full rounded-xl border-2 border-primary/40 shadow-lg" />
+            </div>
+            {/* полотно соперника — снизу */}
+            <div className="w-full max-w-[min(92vw,430px)]">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-[14px] font-extrabold text-muted-foreground uppercase tracking-wide">
+                  {opponent ? <Portrait src={opponent.avatar} size={20} /> : <BotAvatar level={state.botLevel} size={20} />}
+                  <span className="truncate">{botName}</span>
+                </span>
+                <span className={`shrink-0 text-[15px] font-extrabold ${bot.total > my.total ? 'text-[#8a5a3a]' : 'text-foreground/70'}`}>
+                  {bot.total > 0 ? '+' : ''}{bot.total}
+                </span>
+              </div>
+              <MiniQuilt board={state.players[1].board} className="w-full rounded-xl border-2 border-border shadow-lg" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+/**
+ * Разбивка счёта. ВСЕ три строки выводятся ВСЕГДА (нет награды — прочерк):
+ * у обоих игроков строки занимают одинаковое количество строк, поэтому
+ * «Итог» оказывается на ОДНОМ УРОВНЕ, сколько бы наград и пустых клеток
+ * ни было у каждого (просьба пользователя: «выровни счёт на одном уровне,
+ * пусть будет пусто, если нет ничего»).
+ */
 function ScoreList({
   s,
   mine = false,
@@ -184,8 +249,13 @@ function ScoreList({
   return (
     <div className={`mt-2 space-y-1 text-[13.5px] font-semibold transition-opacity duration-500 ${shown ? 'opacity-100' : 'opacity-0'}`}>
       <Row label={t('e_buttons')} value={`+${s.buttons}`} />
-      {s.tile > 0 && <Row label={t('e_tile')} value={`+${s.tile}`} gold />}
-      {s.emptyCount > 0 && <Row label={t('e_empty_cells', { n: s.emptyCount })} value={`${s.empty}`} bad />}
+      <Row label={t('e_tile')} value={s.tile > 0 ? `+${s.tile}` : '—'} gold={s.tile > 0} dim={s.tile <= 0} />
+      <Row
+        label={s.emptyCount > 0 ? t('e_empty_cells', { n: s.emptyCount }) : t('e_empty_cells_plain')}
+        value={s.emptyCount > 0 ? `${s.empty}` : '—'}
+        bad={s.emptyCount > 0}
+        dim={s.emptyCount <= 0}
+      />
       <div className="stitch-divider !my-1" />
       <div className="flex justify-between text-[15px] font-extrabold">
         <span>{mine ? t('e_my_score') : t('e_score')}</span>
@@ -199,11 +269,26 @@ function ScoreList({
   );
 }
 
-function Row({ label, value, gold, bad }: { label: string; value: string; gold?: boolean; bad?: boolean }) {
+function Row({
+  label,
+  value,
+  gold,
+  bad,
+  dim,
+}: {
+  label: string;
+  value: string;
+  gold?: boolean;
+  bad?: boolean;
+  /** прочерк-плейсхолдер — приглушён, но строку держит (выравнивание) */
+  dim?: boolean;
+}) {
   return (
-    <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={gold ? 'text-[#A6721F]' : bad ? 'text-destructive' : 'text-foreground'}>{value}</span>
+    <div className="flex items-baseline justify-between gap-1">
+      <span className={`truncate ${dim ? 'text-muted-foreground/45' : 'text-muted-foreground'}`}>{label}</span>
+      <span className={`shrink-0 tabular-nums ${dim ? 'text-muted-foreground/45' : gold ? 'text-[#A6721F]' : bad ? 'text-destructive' : 'text-foreground'}`}>
+        {value}
+      </span>
     </div>
   );
 }
