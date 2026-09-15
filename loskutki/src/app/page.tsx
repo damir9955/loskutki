@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BotLevel } from '@/lib/game/constants';
 import type { GameState } from '@/lib/game/types';
 import { createGame } from '@/lib/game/engine';
 import { GameScreen } from '@/components/game/GameScreen';
 import { HomeScreen } from '@/components/game/HomeScreen';
+import { InviteChallengePopup, type ChallengeAcceptedSession } from '@/components/game/InviteChallengePopup';
 import { MultiplayerScreen } from '@/components/game/MultiplayerScreen';
 import { OnlineGameScreen } from '@/components/game/OnlineGameScreen';
 import RulesDialog from '@/components/game/RulesDialog';
 import { BootGate } from '@/components/game/BootGate';
 import { sound } from '@/lib/sound';
 import { loadStore, saveStore, todaySeedValue } from '@/lib/storage';
-import { loadSession, saveSession, type MpSession } from '@/lib/net';
+import { loadSession, mpControl, saveSession, type MpSession } from '@/lib/net';
 import { frBoot, onFriendsUiEvent } from '@/lib/friends';
 import { t } from '@/lib/i18n';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,12 @@ export default function Page() {
   const [mpPlaying, setMpPlaying] = useState(false);
   /** «Быстрая игра» из главного меню: хаб открывается и сразу ищет пару */
   const [autoQuick, setAutoQuick] = useState(false);
+  /** зеркало mpPlaying для колбэков друзей (тост «отклонил приглашение»
+   *  должен отличать «уже играем» от «ещё ждём») без перестройки подписки */
+  const mpPlayingRef = useRef(mpPlaying);
+  useEffect(() => {
+    mpPlayingRef.current = mpPlaying;
+  }, [mpPlaying]);
 
   // синхронизация настроек звука при загрузке
   useEffect(() => {
@@ -60,10 +67,22 @@ export default function Page() {
           toast({ title: t('fr_new_msg', { name: e.name }), description: e.text.slice(0, 80) });
           break;
         case 'invite':
-          toast({ title: t('fr_invite_t', { name: e.name }), description: t('fr_invite_d') });
+          // вызов на поединок показывает глобальный попап (InviteChallengePopup)
           break;
-        case 'invite_gone':
+        case 'invite_gone': {
+          // это видит ЗОВУЩИЙ: приглашение больше не ждёт ответа.
+          // Даём секунду: если друг ПРИНЯЛ — партия стартует (mpPlaying),
+          // и тост «отклонил» не нужен; иначе — честно сообщаем.
+          const name = e.name;
+          if (name) {
+            setTimeout(() => {
+              if (!mpPlayingRef.current) {
+                toast({ title: t('fr_invite_declined', { name }) });
+              }
+            }, 1200);
+          }
           break;
+        }
       }
     });
   }, [toast, online]);
@@ -115,6 +134,30 @@ export default function Page() {
     setAutoQuick(false);
     setMpOpen(true);
     if (role === 'guest') setMpPlaying(true);
+  };
+
+  /** вызов от друга принят в глобальном попапе: корректно покидаем
+   *  текущую комнату/партию и входим в комнату друга (гость — сразу в бой) */
+  const handleChallengeAccepted = (s: ChallengeAcceptedSession) => {
+    // 1) были в комнате (партия или ожидание) — сообщаем серверу об уходе:
+    //    соперник сразу увидит «покинул партию», ждущая комната исчезнет из лобби
+    if (session) {
+      void mpControl({ code: session.code, playerId: session.playerId, op: 'leave' }).catch(() => {
+        /* комната могла уже закрыться */
+      });
+    }
+    // 2) незаконченную офлайн-партию прибираем на «Продолжить партию»
+    if (game && game.phase !== 'gameover' && game.mode !== 'online') {
+      const store = loadStore();
+      store.currentGame = game;
+      saveStore(store);
+    }
+    // 3) входим в комнату друга — партия стартуется сразу
+    setGame(null);
+    updateSession(s);
+    setAutoQuick(false);
+    setMpOpen(true);
+    setMpPlaying(true);
   };
 
   const exitOnline = (reason: 'user' | 'error') => {
@@ -189,6 +232,12 @@ export default function Page() {
         />
       )}
         <RulesDialog open={rulesOpen} onOpenChange={setRulesOpen} />
+        {/* глобальный вызов на поединок: попап поверх любого экрана,
+            включая активную партию */}
+        <InviteChallengePopup
+          inOnlineGame={!!session && mpPlaying}
+          onAccepted={handleChallengeAccepted}
+        />
       </main>
     </BootGate>
   );

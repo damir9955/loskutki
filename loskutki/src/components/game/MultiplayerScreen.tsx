@@ -33,6 +33,7 @@ import {
   mpJoin,
   mpListRooms,
   mpOnRooms,
+  mpOnNet,
   mpOnView,
   mpQuick,
   mpQuickCancel,
@@ -48,7 +49,7 @@ import type { OpenRoomInfo } from '@/lib/ws';
 import { useFriends } from '@/lib/friends';
 import { FriendsDialog } from './FriendsDialog';
 import { useOnline } from '@/lib/useOnline';
-import { WifiOff } from 'lucide-react';
+import { ServerCrash, WifiOff } from 'lucide-react';
 
 const POLL_MS = 1500;
 const LIST_MS = 5000;
@@ -92,6 +93,9 @@ export function MultiplayerScreen({
   const [copied, setCopied] = useState(false);
   /** сетевые сбои: не выкидываем из комнаты, показываем «переподключение» */
   const [reconnecting, setReconnecting] = useState(false);
+  /** сервер онлайн-игры недоступен: интернет есть, но сокет не открывается
+   *  (например, адрес сервера сменился) — подсказываем, где его вписать */
+  const [wsDown, setWsDown] = useState(false);
   /** автопоиск: playerId держим в ref (поиск эфемерный, localStorage не нужен) */
   const [searching, setSearching] = useState(false);
   const [searchSec, setSearchSec] = useState(0);
@@ -187,17 +191,48 @@ export function MultiplayerScreen({
   useEffect(() => {
     if (waiting || searching) return;
     if (mpWsEnabled()) {
-      // WS-режим: сервер сам рассылает список открытых комнат (~3с)
-      const unsub = mpOnRooms((rooms) => setOpenRooms(rooms));
-      return unsub;
+      // WS-режим: сервер сам рассылает список открытых комнат (~3с).
+      // Подписка сама открывает сокет: если он не открывается — сервер
+      // онлайн-игры недоступен (сбитый адрес) — показываем подсказку.
+      let stop = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let fails = 0;
+      const unsub = mpOnRooms((rooms) => {
+        fails = 0;
+        setWsDown(false);
+        setOpenRooms(rooms);
+      });
+      const unsubNet = mpOnNet((ok) => {
+        if (!ok) {
+          fails++;
+          if (fails >= 2) setWsDown(true);
+        } else {
+          fails = 0;
+          setWsDown(false);
+        }
+      });
+      // страховка: события не пришли вовсе (адрес совсем глухой)
+      timer = setTimeout(() => {
+        if (fails === 0) setWsDown(true);
+      }, 9000);
+      return () => {
+        stop = true;
+        clearTimeout(timer);
+        unsubNet();
+        unsub();
+      };
     }
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      const rooms = await mpListRooms();
-      if (stop) return;
-      setOpenRooms(rooms);
-      timer = setTimeout(refresh, LIST_MS);
+      try {
+        const rooms = await mpListRooms();
+        if (stop) return;
+        setOpenRooms(rooms);
+      } catch {
+        if (stop) return;
+      }
+      if (!stop) timer = setTimeout(refresh, LIST_MS);
     };
     void refresh();
     return () => {
@@ -272,6 +307,14 @@ export function MultiplayerScreen({
       stop = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      // экран размонтировался посреди поиска (приняли вызов друга из
+      // глобального попапа, ушли домой) — отменяем очередь и на сервере,
+      // иначе в ней останется «призрак», с которым сведёт незнакомца
+      const pid = quickIdRef.current;
+      if (pid) {
+        quickIdRef.current = null;
+        void mpQuickCancel(pid).catch(() => { /* сервер мог недосягаем */ });
+      }
     };
   }, [searching]);
 
@@ -643,6 +686,20 @@ export function MultiplayerScreen({
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-extrabold text-foreground">{t('mp_offline_t')}</div>
             <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_offline_d')}</div>
+          </div>
+        </div>
+      )}
+
+      {/* интернет есть, но сервер онлайн-игры не отвечает — скорее всего
+          сменился адрес сервера (переезд на новый Deno Deploy): подсказка */}
+      {online && wsDown && !waiting && !searching && (
+        <div className="pop-in mt-3 flex items-center gap-3 rounded-2xl border-2 border-[#A6721F]/45 bg-[#A6721F]/10 p-3.5 shadow-[inset_0_2px_0_rgba(255,255,255,.5)]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#A6721F]/15">
+            <ServerCrash className="h-5 w-5 text-[#8a5c14]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-extrabold text-foreground">{t('mp_srvdown_t')}</div>
+            <div className="text-[12.5px] font-semibold text-muted-foreground">{t('mp_srvdown_d')}</div>
           </div>
         </div>
       )}

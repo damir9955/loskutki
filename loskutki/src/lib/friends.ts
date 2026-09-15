@@ -79,7 +79,7 @@ export type FriendsUiEvent =
   | { kind: 'gone'; name: string }
   | { kind: 'msg'; from: string; name: string; text: string }
   | { kind: 'invite'; from: string; name: string }
-  | { kind: 'invite_gone'; from: string };
+  | { kind: 'invite_gone'; from: string; name: string };
 
 const INVITE_TTL_MS = 60_000;
 
@@ -227,9 +227,10 @@ function handleServerEvent(m: Record<string, unknown>): void {
   } else if (t === 'fr_invite_gone') {
     const from = typeof m.from === 'string' ? m.from : '';
     if (from) {
+      const name = state.friends.find((f) => f.uid === from)?.name ?? '';
       state = { ...state, invites: state.invites.filter((i) => i.from.uid !== from) };
       emit();
-      notifyUi({ kind: 'invite_gone', from });
+      notifyUi({ kind: 'invite_gone', from, name });
     }
   }
 }

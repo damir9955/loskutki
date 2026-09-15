@@ -118,6 +118,14 @@ class SoundEngine {
   error() {
     this.tone(150, 0.12, { type: 'square', gain: 0.08 });
   }
+
+  /** вызов на поединок от друга — сигнальный «рог» (три восходящие ноты) */
+  challenge() {
+    this.tone(587, 0.16, { type: 'triangle', gain: 0.22 });
+    this.tone(784, 0.16, { type: 'triangle', gain: 0.22, delay: 0.14 });
+    this.tone(1175, 0.34, { type: 'triangle', gain: 0.24, delay: 0.28, slide: 80 });
+    this.noise(0.22, { freq: 900, sweep: 2400, gain: 0.05, delay: 0.06, q: 1.2 });
+  }
 }
 
 export const sound = new SoundEngine();

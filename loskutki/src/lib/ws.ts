@@ -59,11 +59,26 @@ const WATCHDOG_PING_MS = 10_000; // молчание сервера → шлём
 const WATCHDOG_KILL_MS = 25_000; // совсем глухое молчание → пересоздать сокет
 const IDLE_CLOSE_MS = 60_000; // нет подписок и запросов → закрыть сокет
 
+/** ключ localStorage с ручным адресом сервера (Настройки → «Сервер
+ *  онлайн-игры»): адрес нового Deno Deploy можно вписать прямо в игре,
+ *  не трогая переменные окружения Vercel. 'off'/'none' — выключить WS. */
+export const WS_URL_OVERRIDE_KEY = 'loskutki.wsUrl';
+
+function readOverride(): string {
+  try {
+    if (typeof window === 'undefined') return '';
+    return (window.localStorage.getItem(WS_URL_OVERRIDE_KEY) ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
 /** адрес WS-сервера. Пусто — WS-режим выключен (HTTP-роуты).
- *  Значение по умолчанию вшито в next.config (Deno Deploy),
- *  env NEXT_PUBLIC_WS_URL его перекрывает; «off»/«none» — выключить. */
+ *  Приоритет: ручной адрес из Настроек → значение из next.config (Deno
+ *  Deploy, задаётся env NEXT_PUBLIC_WS_URL, «off»/«none» — выключить). */
 export function wsUrl(): string {
-  const raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
+  let raw = readOverride();
+  if (!raw) raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
   if (!raw || /^(off|none|disabled)$/i.test(raw)) return '';
   let u = raw.replace(/\/+$/, '');
   if (/^wss:\/\//i.test(u) || /^ws:\/\//i.test(u)) return u;

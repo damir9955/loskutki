@@ -53,6 +53,7 @@
     "scripts/test-quick-visible.ts",
     "scripts/test-friends.ts",
     "scripts/test-quick-uid.ts",
+    "scripts/test-invite-ingame.ts",
     "scripts/debug-view.ts",
     "scripts/debug-fr-snap.ts"
   ]

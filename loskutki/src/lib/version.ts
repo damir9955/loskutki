@@ -2,7 +2,7 @@
  *  Пишется в маркер полной загрузки и в кэш service-воркера: смена
  *  версии = фоновое обновление кэша; в меню не показывается —
  *  смотреть в «Настройках». */
-export const APP_VERSION = '3.2.0';
+export const APP_VERSION = '3.3.0';
 
 /** ключ localStorage с маркером «игра полностью скачана» */
 export const BOOT_MARKER_KEY = 'loskutki.boot';

@@ -2,20 +2,29 @@
  * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy.
  * ============================================================
  *
- * КАК РАЗВЕРНУТЬ (5 минут, бесплатно, из РФ без VPN):
- *   1. Открой https://dash.deno.com → «New Playground»
- *      (именно Playground! НЕ «New Project» из GitHub — весь сайт игры
- *      живёт на Vercel, здесь нужен только этот один файл)
+ * КАК РАЗВЕРНУТЬ на НОВОЙ консоли (console.deno.com, бесплатно):
+ *   1. Открой https://console.deno.com → своя организация → Applications
+ *      → «New Playground» (весь сайт игры живёт на Vercel, здесь нужен
+ *      только этот один файл)
  *   2. Удали содержимое main.ts и вставь ВЕСЬ этот файл целиком
- *   3. Нажми «Save & Deploy» — получишь адрес https://<имя>.deno.dev
- *   4. В настройках Vercel игры добавь переменную окружения
- *      NEXT_PUBLIC_WS_URL = wss://<имя>.deno.dev и сделай Redeploy
- *   5. Проверка: открой https://<имя>.deno.dev в браузере —
- *      увидишь страницу «Лоскутки: сервер онлайн»
- * Обновлять сервер потом — просто отредактировать код в Playground
- * и нажать Save & Deploy снова.
+ *   3. Нажми «Deploy» — внизу в BUILD LOGS все шаги должны позеленеть
+ *      (Warm up проходит всегда: HTTP-сервер поднимается первым)
+ *   4. ЧТОБЫ КОМНАТЫ ПЕРЕЖИВАЛИ ПЕРЕЗАПУСК, подключи базу (1 раз):
+ *      Settings приложения → Databases → «Attach Database» →
+ *      «Provision Database» → движок Deno KV → выбрать регион → Create.
+ *      Без базы сервер работает в режиме памяти (деплой НЕ падает,
+ *      но после паузы комнаты/друзья сбрасываются).
+ *   5. Адрес из шапки редактора (https://<имя>...) впиши в игре:
+ *      Настройки → «Сервер онлайн-игры» → Сохранить. Либо задай
+ *      переменную NEXT_PUBLIC_WS_URL = https://<имя>... на Vercel.
+ *   6. Проверка: открой адрес сервера в браузере — увидишь страницу
+ *      «Лоскутки: сервер онлайн» (строка «Хранение» покажет, подключён
+ *      ли Deno KV).
  *
  * ЧТО ВНУТРИ:
+ *   — Deno.serve() поднимается МОМЕНТАЛЬНО (требование новой платформы:
+ *     этап «Warm up» ждёт HTTP-сервер), KV подключается следом и не
+ *     может заблокировать запуск;
  *   — комнаты хранятся в Deno KV: ПЕРЕЖИВАЮТ перезапуск и новый деплой
  *     (игрок, вернувшись по коду комнаты, застаёт партию на месте);
  *     в bun-тестах и без KV — режим оперативной памяти;
@@ -29,6 +38,7 @@
  *   — переподключение: клиент шлёт state с кодом комнаты и playerId
  *     (сессия в localStorage) — сервер высылает ПОЛНОЕ состояние;
  *   — быстрый матч (quick match): два искателя сводятся в одну комнату;
+ *   — друзья: заявки по ID, чат, приглашения (хранение в KV);
  *   — авто-просрочка ходов (3 минуты) с паузой, если владелец не на связи;
  *   — GET / — страница «сервер онлайн» + CORS для браузера.
  *
@@ -1041,6 +1051,26 @@ interface ChanLike {
 let kv: KvLike | null = null;
 let chan: ChanLike | null = null;
 let kvOn = false;
+
+/** «Ворот готовности KV»: при старте сервера KV подключается асинхронно
+ *  ПОСЛЕ Deno.serve (иначе этап Warm up новой платформы Deno Deploy
+ *  падает). Команды сокета ждут этот промис (максимум KV_GATE_MS), чтобы комнаты
+ *  не создавались в памяти, когда KV вот-вот подключится. В тестах
+ *  (модуль импортирован, initPersistence вызывается напрямую) — открыт. */
+const KV_GATE_MS = 3_000;
+let kvGate: Promise<void> = Promise.resolve();
+let kvGateOpen: () => void = () => { /* по умолчанию уже открыт */ };
+
+/** заблокировать ворот до готовности KV (вызывается ровно один раз
+ *  из блока запуска перед Deno.serve) */
+export function armKvGate(): void {
+  kvGate = new Promise<void>((r) => {
+    kvGateOpen = r;
+  });
+  // страховка: даже если openKv завис навсегда, через KV_GATE_MS ворот
+  // открывается — сервер остаётся работоспособным в режиме памяти
+  setTimeout(kvGateOpen, KV_GATE_MS);
+}
 
 /** кап журнала при записи в KV (значение ключа ограничено ~64 КБ,
  *  а длинные партии наращивают журнал; свежие записи важнее старых) */
@@ -2512,6 +2542,15 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
       case 'pong':
         return; // присутствие отмечено (lastSeen)
 
+      default:
+        // все команды, кроме пустых (создание/вход/ходы/друзья), ждут
+        // готовности KV (максимум KV_GATE_MS после старта): комнаты не
+        // должны создаваться в памяти, когда KV вот-вот подключится.
+        // При загруженном модуле без запуска сервера ворот всегда открыт.
+        await kvGate;
+    }
+
+    switch (t) {
       case 'create': {
         const res = await createRoomA({ name: msg.name, avatar: msg.avatar, isPublic: msg.isPublic });
         attach(ctx, res.code, res.playerId);
@@ -2765,6 +2804,9 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
         await inviteSet(to, me, inv);
         frSnapInvalidate(to);
         pushFrA(to, { t: 'fr_invite', invite: inv });
+        // зовущий сразу привязан к своей комнате (как после 'create'):
+        // момент принятия другом = мгновенный push «партия стартовала»
+        attach(ctx, code, playerId);
         respond(ctx, ref, { ok: true, code, playerId });
         return;
       }
@@ -3063,8 +3105,18 @@ export async function serverStatsA(): Promise<{
 // 8. HTTP + ЗАПУСК DENO DEPLOY
 // ============================================================
 
-async function healthHtml(): Promise<string> {
-  const st = await serverStatsA();
+/** health-страница: st=null — статистика не успела посчитаться (гонка с
+ *  таймаутом), показываем базовую версию — главное, что сервер ответил. */
+function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string {
+  const line = st
+    ? `<p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
+    <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
+    <p>Хранение: ${
+      st.kv
+        ? 'Deno KV — комнаты переживают перезапуск'
+        : 'память (перезапуск очистит комнаты). На Deno Deploy: Settings → Databases → Attach Database → Provision Database (Deno KV)'
+    }</p>`
+    : `<p>Сервер только что запустился — статистика появится через минуту.</p>`;
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -3075,7 +3127,7 @@ async function healthHtml(): Promise<string> {
   body { font-family: system-ui, sans-serif; background: #2B2118; color: #EFE0BC;
          display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
   .card { background: #3A2E21; border-radius: 20px; padding: 40px 48px; text-align: center;
-          box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+          box-shadow: 0 10px 40px rgba(0,0,0,.35); max-width: 480px; }
   h1 { font-size: 28px; margin: 0 0 8px; color: #FFD98A; }
   p { margin: 6px 0; color: #C9BCA4; font-size: 15px; }
   .ok { display: inline-block; margin-top: 14px; padding: 8px 18px; border-radius: 999px;
@@ -3086,9 +3138,7 @@ async function healthHtml(): Promise<string> {
   <div class="card">
     <h1>🧵 Лоскутки: сервер онлайн</h1>
     <p>WebSocket-сервер мультиплеера работает.</p>
-    <p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
-    <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
-    <p>Хранение: ${st.kv ? 'Deno KV — комнаты переживают перезапуск' : 'память (перезапуск очистит комнаты)'}</p>
+    ${line}
     <span class="ok">Готов к игре</span>
   </div>
 </body>
@@ -3103,10 +3153,18 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
-// Запуск транспорта. import.meta.main = true, когда файл выполнен как
-// точка входа (Deno Deploy Playground / deno run server.ts). При импорте
-// в тестах (bun) сервер не поднимается — доступно только ядро.
-if (import.meta.main) {
+// Запуск транспорта. Файл выполняется как точка входа (новая консоль
+// Deno Deploy console.deno.com / deno run server.ts). При импорте в
+// bun-тестах сервер не поднимается — доступно только ядро.
+//
+// ВАЖНО (новая платформа Deno Deploy, 2026): сборщик «прогревает»
+// приложение — запускает изолят и ЖДЁТ, пока поднимется HTTP-сервер
+// (этап «Warm up»). Поэтому Deno.serve() вызывается ПЕРВЫМ, а Deno KV
+// подключается асинхронно ПОСЛЕ: на новой платформе KV требует
+// подключённой базы данных (Databases → Provision Database → Deno KV),
+// и без неё openKv может не завершиться — сервер обязан подняться всё
+// равно (режим памяти), иначе деплой падает на Warm up.
+if (import.meta.main || onDeployHint()) {
   interface DenoWsSocket {
     send(d: string | Uint8Array): void;
     close(): void;
@@ -3127,35 +3185,12 @@ if (import.meta.main) {
   }
   const port = Number(D.env?.get('PORT') ?? 8000);
 
-  // Deno KV: комнаты переживают перезапуск и новый деплой. На Deploy
-  // доступен всегда (путь игнорируется платформой); локально требует
-  // флага --unstable-kv, иначе — режим памяти. Ошибка открытия НЕ
-  // роняет сервер.
-  let kvLike: KvLike | null = null;
-  try {
-    // путь на Deploy игнорируется платформой, локально — файл рядом;
-    // openKv асинхронен (возвращает промис) — ждём его
-    const raw = D.openKv ? D.openKv('loskutki-kv') : null;
-    const resolved = raw && typeof (raw as PromiseLike<unknown>).then === 'function' ? await raw : raw;
-    kvLike = (resolved ?? null) as KvLike | null;
-  } catch {
-    kvLike = null;
-  }
-  // BroadcastChannel: мгновенные push между изолятами Deno Deploy
-  // (игроки в разных регионах). Локально может отсутствовать — не критично.
-  let chanLike: ChanLike | null = null;
-  try {
-    const BC = (globalThis as unknown as { BroadcastChannel?: new (name: string) => ChanLike }).BroadcastChannel;
-    chanLike = BC ? new BC('loskutki-rooms-v1') : null;
-  } catch {
-    chanLike = null;
-  }
-  initPersistence(kvLike, chanLike);
-  console.log(
-    `[Лоскутки] KV: ${kvLike ? 'включён — комнаты переживают перезапуск' : 'выключен — режим памяти'}` +
-      ` · канал изолятов: ${chanLike ? 'включён' : 'выключен'}`,
-  );
+  // 0) запереть «ворот KV»: команды сокетов подождут подключения KV
+  //    (максимум KV_GATE_MS), но сам boot это не тормозит
+  armKvGate();
 
+  // 1) HTTP-сервер — НЕМЕДЛЕННО: платформа ждёт его на этапе «Warm up».
+  //    Всё, что может ждать/падать (KV), подключается ниже асинхронно.
   D.serve({ port }, async (req: Request): Promise<Response> => {
     // WebSocket-соединение (любой путь) — без await до апгрейда
     const upgrade = req.headers.get('upgrade')?.toLowerCase() ?? '';
@@ -3183,7 +3218,12 @@ if (import.meta.main) {
     }
     if (url.pathname === '/' || url.pathname === '/health') {
       try {
-        return new Response(await healthHtml(), {
+        // статистика не должна подвесить ответ: гонка с таймаутом
+        const st = await Promise.race([
+          serverStatsA(),
+          new Promise<null>((r) => setTimeout(() => r(null), 1500)),
+        ]);
+        return new Response(healthHtml(st), {
           headers: { 'content-type': 'text/html; charset=utf-8', ...corsHeaders() },
         });
       } catch {
@@ -3194,4 +3234,70 @@ if (import.meta.main) {
   });
   startSweeper();
   console.log(`[Лоскутки] WebSocket-сервер запущен (порт ${port}). Health: GET /`);
+
+  // 2) Канал изолятов — синхронный, до первого запроса.
+  let chanLike: ChanLike | null = null;
+  try {
+    const BC = (globalThis as unknown as { BroadcastChannel?: new (name: string) => ChanLike }).BroadcastChannel;
+    chanLike = BC ? new BC('loskutki-rooms-v1') : null;
+  } catch {
+    chanLike = null;
+  }
+
+  // 3) Deno KV — асинхронно ПОСЛЕ serve. На новой платформе Deno Deploy
+  //    базе нужен вызов БЕЗ аргументов (платформа сама подставляет базу
+  //    таймлайна; путь-аргумент там не поддерживается). Локально путь
+  //    «loskutki-kv» создаёт файл рядом со скриптом. Гонка с таймаутом:
+  //    неответившее openKv (нет подключённой базы) не подвешивает
+  //    сервер — остаёмся в режиме памяти.
+  const attachKv = async (): Promise<void> => {
+    if (!D.openKv) {
+      kvGateOpen();
+      return;
+    }
+    const deploy = onDeployHint();
+    let kvLike: KvLike | null = null;
+    try {
+      const raw = D.openKv(deploy ? undefined : 'loskutki-kv');
+      const resolved = await Promise.race([
+        raw && typeof (raw as PromiseLike<unknown>).then === 'function' ? raw : Promise.resolve(raw),
+        new Promise<null>((r) => setTimeout(() => r(null), KV_GATE_MS)),
+      ]);
+      kvLike = (resolved ?? null) as KvLike | null;
+    } catch {
+      kvLike = null;
+    }
+    initPersistence(kvLike, chanLike);
+    kvGateOpen(); // KV готов (или не будет) — команды идут дальше
+    if (kvLike) {
+      console.log('[Лоскутки] KV подключён — комнаты переживают перезапуск');
+    } else {
+      console.log(
+        '[Лоскутки] KV НЕ подключён — режим памяти. ' +
+          (deploy
+            ? 'Подключи базу: Settings → Databases → Attach Database → Provision Database (Deno KV).'
+            : 'Локально: запусти с флагом --unstable-kv.'),
+      );
+    }
+  };
+  void attachKv().catch(() => kvGateOpen());
+}
+
+/** Признак «мы на Deno Deploy»: платформа отмечает изолят переменными
+ *  окружения. На новой консоли сборщик может выполнить модуль НЕ как
+ *  main (обёртка входной точки) — тогда import.meta.main ложен, а
+ *  сервер всё равно обязан подняться. */
+function onDeployHint(): boolean {
+  try {
+    const env = (globalThis as { Deno?: { env?: { get(k: string): string | undefined } } }).Deno?.env;
+    if (!env) return false;
+    return Boolean(
+      env.get('DENO_DEPLOYMENT_ID') ||
+        env.get('DENO_TIMELINE') ||
+        env.get('DENO_DEPLOY_SUBHOST') ||
+        env.get('DENO_REGION'),
+    );
+  } catch {
+    return false;
+  }
 }
