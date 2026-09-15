@@ -1,6 +1,13 @@
 /**
- * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy.
+ * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy (v3.3.1).
  * ============================================================
+ *
+ * v3.3.1 — ПОЧИНЕН ДЕПЛОЙ на console.deno.com: раньше этапы сборки
+ * «Warm up» и «Register crons» падали, потому что HTTP-сервер
+ * поднимался только при import.meta.main — а платформа выполняет
+ * входную точку через свою обёртку (main=false). Теперь сервер
+ * поднимается под ЛЮБЫМ Deno всегда (кроме bun-тестов), а реджект
+ * openKv без подключённой базы больше не убивает изолят.
  *
  * КАК РАЗВЕРНУТЬ на НОВОЙ консоли (console.deno.com, бесплатно):
  *   1. Открой https://console.deno.com → своя организация → Applications
@@ -3153,9 +3160,16 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
-// Запуск транспорта. Файл выполняется как точка входа (новая консоль
-// Deno Deploy console.deno.com / deno run server.ts). При импорте в
-// bun-тестах сервер не поднимается — доступно только ядро.
+// Запуск транспорта. Под ЛЮБЫМ Deno (deno run server.ts, Deno Deploy
+// console.deno.com — как main и как импортированный модуль-обёртку)
+// сервер поднимается ВСЕГДА. Исключение — bun: bun-реплика импортирует
+// ядро файла для локальных E2E-тестов, и транспорт ей не нужен.
+//
+// Почему «всегда», а не import.meta.main: новая платформа Deno Deploy
+// может выполнять входную точку через собственную обёртку (main=false),
+// а этапы сборки «Warm up» (запуск + HTTP-запрос к preview URL) и
+// «Register crons» (оценка топ-левел кода для извлечения Deno.cron)
+// обязаны увидеть поднявшийся HTTP-сервер — иначе деплой ПАДАЕТ.
 //
 // ВАЖНО (новая платформа Deno Deploy, 2026): сборщик «прогревает»
 // приложение — запускает изолят и ЖДЁТ, пока поднимется HTTP-сервер
@@ -3164,7 +3178,14 @@ function corsHeaders(): Record<string, string> {
 // подключённой базы данных (Databases → Provision Database → Deno KV),
 // и без неё openKv может не завершиться — сервер обязан подняться всё
 // равно (режим памяти), иначе деплой падает на Warm up.
-if (import.meta.main || onDeployHint()) {
+
+/** bun-реплика (scripts/run-server-bun.ts) импортирует ядро этого файла
+ *  и поднимает СВОЙ транспорт — наш Deno-клей ей не нужен. В рантайме
+ *  bun глобально доступен объект Bun (в Deno его нет). */
+function isBunRuntime(): boolean {
+  return typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
+}
+if (!isBunRuntime()) {
   interface DenoWsSocket {
     send(d: string | Uint8Array): void;
     close(): void;
@@ -3183,6 +3204,20 @@ if (import.meta.main || onDeployHint()) {
   if (!D) {
     throw new Error('Этот файл запускается под Deno: deno run server.ts или вставь в Deno Deploy Playground');
   }
+
+  // 0а) СТРАХОВКА ИЗОЛЯТА: незахваченный реджект промиса (например,
+  //     зависший/отказавший openKv без подключённой базы) не должен
+  //     УБИВАТЬ процесс — иначе новая платформа Deno Deploy падает на
+  //     этапах «Warm up» / «Register crons». Логируем и живём дальше.
+  try {
+    addEventListener('unhandledrejection', (ev) => {
+      ev.preventDefault();
+      try {
+        console.error('[Лоскутки] незахваченный rejection (не фатален):', ev.reason);
+      } catch { /* ignore */ }
+    });
+  } catch { /* среда без событий — ок */ }
+
   const port = Number(D.env?.get('PORT') ?? 8000);
 
   // 0) запереть «ворот KV»: команды сокетов подождут подключения KV
@@ -3259,8 +3294,16 @@ if (import.meta.main || onDeployHint()) {
     let kvLike: KvLike | null = null;
     try {
       const raw = D.openKv(deploy ? undefined : 'loskutki-kv');
+      // ГЛАВНОЕ: у промиса openKv ВСЕГДА есть свой catch — если база не
+      // подключена и openKv отказывает ПОЗЖЕ победившего таймаута гонки,
+      // реджект не должен стать незахваченным (это убивало изолят на
+      // этапах Warm up / Register crons новой платформы).
+      const rawP =
+        raw && typeof (raw as PromiseLike<unknown>).then === 'function'
+          ? Promise.resolve(raw).catch(() => null)
+          : Promise.resolve(raw);
       const resolved = await Promise.race([
-        raw && typeof (raw as PromiseLike<unknown>).then === 'function' ? raw : Promise.resolve(raw),
+        rawP,
         new Promise<null>((r) => setTimeout(() => r(null), KV_GATE_MS)),
       ]);
       kvLike = (resolved ?? null) as KvLike | null;
