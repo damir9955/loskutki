@@ -139,7 +139,12 @@ export function EndScreen({
           </div>
         </div>
 
-        <div className="mt-1 text-center text-[10.5px] font-bold text-muted-foreground/80">
+        {/* v3.9.0: подсказка «нажмите на полотно…» — КРУПНАЯ и КРАСНАЯ,
+            чтобы игрок точно заметил, что поля можно сравнить */}
+        <div
+          className="mt-1 text-center text-[16px] font-extrabold text-[#E04736]"
+          style={{ textShadow: '0 1px 0 rgba(255,255,255,.45)' }}
+        >
           {t('e_compare_hint')}
         </div>
 
@@ -172,9 +177,10 @@ export function EndScreen({
       </div>
 
       {/* ===== СРАВНЕНИЕ ПОЛОТЕН: оба крупно, моё сверху, соперника снизу.
-           v3.7.0: заголовок крупный красный, поля с цветными рамками и
-           бейджами, всё гарантированно влезает в экран БЕЗ прокрутки
-           (доски делят свободную высоту поровну и letterbox-ятся) ===== */}
+           v3.7.0: заголовок красный, рамки, без прокрутки.
+           v3.9.0: всё ещё компактнее (заголовок/бейджи меньше), сама карта
+           меньше рамки — между ними равный тёмный промежуток со всех сторон
+           (см. MiniQuilt: quilt вписан в 85% квадрата) ===== */}
       {compare && (
         <div
           className="fixed inset-0 z-[60] flex flex-col bg-[#2B2118]/94 backdrop-blur-md"
@@ -184,10 +190,10 @@ export function EndScreen({
           onClick={() => setCompare(false)}
         >
           {/* заголовок — крупно и красным, чтобы сразу бросалось в глаза */}
-          <div className="flex shrink-0 items-center justify-between gap-2 px-4 pb-1 pt-[max(env(safe-area-inset-top),12px)]">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-0.5 pt-[max(env(safe-area-inset-top),10px)]">
             <div className="w-10" />
             <div
-              className="font-display min-w-0 flex-1 text-center text-[25px] font-black uppercase leading-tight tracking-wide text-[#E04736]"
+              className="font-display min-w-0 flex-1 text-center text-[21px] font-black uppercase leading-tight tracking-wide text-[#E04736]"
               style={{ textShadow: '0 2px 0 rgba(0,0,0,.35)' }}
             >
               {t('e_compare_title')}
@@ -202,18 +208,18 @@ export function EndScreen({
             </button>
           </div>
           <div
-            className="flex min-h-0 flex-1 flex-col gap-2 px-3 pb-[max(env(safe-area-inset-bottom),10px)] pt-1.5"
+            className="flex min-h-0 flex-1 flex-col gap-1.5 px-2.5 pb-[max(env(safe-area-inset-bottom),8px)] pt-1"
             onClick={(e) => e.stopPropagation()}
           >
             {/* моё полотно — сверху, зелёная рамка и бейдж */}
             <section className="flex min-h-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-2 pb-1">
-                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#7A9463] px-3 py-1 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-md">
+              <div className="flex shrink-0 items-center justify-between gap-2 pb-0.5">
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#7A9463] px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-white shadow-md">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-white/90" aria-hidden />
                   <span className="truncate">{t('e_my_field')}</span>
                 </span>
                 <span
-                  className={`shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[15px] font-extrabold tabular-nums ${
+                  className={`shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[13px] font-extrabold tabular-nums ${
                     my.total >= bot.total ? 'text-[#B9D08F]' : 'text-white/60'
                   }`}
                 >
@@ -226,17 +232,17 @@ export function EndScreen({
             </section>
             {/* полотно соперника — снизу, красная рамка и бейдж с именем */}
             <section className="flex min-h-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-2 pb-1">
-                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#C33A2F] px-3 py-1 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-md">
+              <div className="flex shrink-0 items-center justify-between gap-2 pb-0.5">
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#C33A2F] px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-white shadow-md">
                   {opponent ? (
-                    <Portrait src={opponent.avatar} size={16} />
+                    <Portrait src={opponent.avatar} size={14} />
                   ) : (
-                    <BotAvatar level={state.botLevel} size={16} />
+                    <BotAvatar level={state.botLevel} size={14} />
                   )}
                   <span className="truncate">{botName}</span>
                 </span>
                 <span
-                  className={`shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[15px] font-extrabold tabular-nums ${
+                  className={`shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[13px] font-extrabold tabular-nums ${
                     bot.total > my.total ? 'text-[#F0A08F]' : 'text-white/60'
                   }`}
                 >

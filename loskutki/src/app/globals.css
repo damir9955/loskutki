@@ -414,15 +414,28 @@ html[data-boot='ready'] .boot-veil {
 }
 
 /* v3.7.0: пульс по краям полотна, когда ход игрока — сразу понятно,
-   чей ход, даже не вглядываясь в мелкую надпись над полем */
+   чей ход, даже не вглядываясь в мелкую надпись над полем.
+   v3.9.0: рамка рисуется ВНУТРИ svg полотна (группа rect'ов в QuiltBoard),
+   поэтому анимируется ТОЛЬКО opacity (box-shadow на svg не работает);
+   цвет — ЗЕЛЁНЫЙ #35A94A, геометрия — всегда квадрат */
 @keyframes turn-glow {
-  0%, 100% { opacity: 0.38; box-shadow: 0 0 10px 1px rgba(192, 96, 58, 0.28); }
-  50% { opacity: 1; box-shadow: 0 0 26px 4px rgba(192, 96, 58, 0.55); }
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }
 .turn-glow { animation: turn-glow 1.5s ease-in-out infinite; }
+
+/* v3.9.0: ставить нечего совсем — кнопка «Шагнуть вперёд» подсвечена
+   зелёной пульсирующей рамкой (в цвет подсветки поля «мой ход»);
+   пульсирует только рамка, содержимое кнопки не гаснет */
+@keyframes adv-forced {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(53, 169, 74, 0.7), 0 0 10px 1px rgba(53, 169, 74, 0.3); }
+  50% { box-shadow: 0 0 0 5px rgba(53, 169, 74, 0.95), 0 0 22px 4px rgba(53, 169, 74, 0.55); }
+}
+.adv-forced { animation: adv-forced 1.5s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .track-popup, .pop-in, .piece-drop, .banner-in, .banner-glow, .confetti-piece { animation-duration: 0.01s !important; }
   .lint, .logo-float, .sway, .needle-run, .dot-online { animation: none !important; }
-  .turn-glow { animation: none !important; }
+  .turn-glow { animation: none !important; opacity: 0.85; }
+  .adv-forced { animation: none !important; box-shadow: 0 0 0 4px rgba(53, 169, 74, 0.9); }
 }

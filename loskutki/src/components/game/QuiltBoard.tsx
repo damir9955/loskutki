@@ -39,6 +39,7 @@ export function QuiltBoard({
   dim = false,
   flashPiece = null,
   ghostBadges = null,
+  turnGlow = false,
 }: {
   board: number[];
   interactive?: boolean;
@@ -54,6 +55,10 @@ export function QuiltBoard({
   flashPiece?: { pieceId: number; r?: number; c?: number } | null;
   /** бирки «цена · время» на призраке */
   ghostBadges?: { cost: number; time: number } | null;
+  /** v3.9.0: ЗЕЛЁНАЯ пульсирующая рамка «мой ход» — рисуется ВНУТРИ svg
+   *  по самому краю квадрата полотна, поэтому ВСЕГДА квадрат (раньше
+   *  div-обводка повторяла прямоугольный контейнер и была не квадратной) */
+  turnGlow?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const pieces = useMemo(() => boardPieces(board), [board]);
@@ -233,6 +238,18 @@ export function QuiltBoard({
         />
       ))}
 
+      {/* v3.9.0: мой ход — зелёная ПУЛЬСИРУЮЩАЯ рамка-квадрат вокруг поля.
+          Рисуется в координатах svg (900×900) поверх деревянной окантовки:
+          три штриха разной ширины/прозрачности = мягкое гало + чёткая линия;
+          анимируется только opacity (дёшево для телефона) */}
+      {turnGlow && (
+        <g className="turn-glow" aria-hidden>
+          <rect x="6" y="6" width="888" height="888" rx="22" fill="none" stroke="#35A94A" strokeWidth="30" opacity="0.20" />
+          <rect x="6" y="6" width="888" height="888" rx="22" fill="none" stroke="#35A94A" strokeWidth="19" opacity="0.36" />
+          <rect x="6" y="6" width="888" height="888" rx="22" fill="none" stroke="#35A94A" strokeWidth="11" opacity="0.96" />
+        </g>
+      )}
+
       {/* призрак размещения */}
       {placing && ghost && (
         <g>
@@ -303,7 +320,13 @@ function GhostBadges({ x, y, cost, time }: { x: number; y: number; cost: number;
 
 /** Мини-превью доски (для панели соперницы и экрана сравнения).
  *  frame — цвет рамки ПОЛЯ (рисуется внутри SVG, поэтому всегда облегает
- *  квадрат полотна, как бы ни letterbox-ился сам svg-элемент) */
+ *  квадрат полотна, как бы ни letterbox-ился сам svg-элемент).
+ *  v3.9.0 (просьба: «карту меньше, чем выделение по краям — маленький
+ *  промежуток со всех сторон»): с рамкой полотно УМЕНЬШЕНО до ~85% и
+ *  отцентровано — между рамкой и картой остаётся равный тёмный зазор
+ *  (фон сквозь svg прозрачен), карта визуально отделена и читается
+ *  меньше; без рамки — как раньше, на всю площадь */
+const MQ_PAD = 66; // отступ карты от края квадрата (в координатах viewBox 900)
 export function MiniQuilt({
   board,
   className,
@@ -315,32 +338,35 @@ export function MiniQuilt({
 }) {
   const pieces = useMemo(() => boardPieces(board), [board]);
   const covered = board.filter((v) => v !== -1).length;
+  const mqScale = frame ? (900 - MQ_PAD * 2) / 900 : 1;
   return (
     <svg viewBox="0 0 900 900" className={className} style={{ display: 'block' }} aria-hidden>
-      <rect x="0" y="0" width="900" height="900" rx="40" fill="#F4EAD2" />
-      <g stroke="#D9C9A3" strokeWidth="2" opacity="0.5">
-        {Array.from({ length: 8 }, (_, i) => (
-          <line key={`v${i}`} x1={(i + 1) * 100} y1="0" x2={(i + 1) * 100} y2="900" />
+      <g transform={frame ? `translate(${MQ_PAD} ${MQ_PAD}) scale(${mqScale})` : undefined}>
+        <rect x="0" y="0" width="900" height="900" rx="40" fill="#F4EAD2" />
+        <g stroke="#D9C9A3" strokeWidth="2" opacity="0.5">
+          {Array.from({ length: 8 }, (_, i) => (
+            <line key={`v${i}`} x1={(i + 1) * 100} y1="0" x2={(i + 1) * 100} y2="900" />
+          ))}
+          {Array.from({ length: 8 }, (_, i) => (
+            <line key={`h${i}`} x1="0" y1={(i + 1) * 100} x2="900" y2={(i + 1) * 100} />
+          ))}
+        </g>
+        {pieces.map((p) => (
+          <PatchGlyph
+            key={p.key}
+            patchId={p.patchId}
+            orientation={p.orientation}
+            x={p.c * 100}
+            y={p.r * 100}
+            cell={100}
+          />
         ))}
-        {Array.from({ length: 8 }, (_, i) => (
-          <line key={`h${i}`} x1="0" y1={(i + 1) * 100} x2="900" y2={(i + 1) * 100} />
-        ))}
+        {covered === 0 && (
+          <text x="450" y="470" textAnchor="middle" fontSize="60" fill="#B9A87F" fontWeight="600">
+            {t('g_empty')}
+          </text>
+        )}
       </g>
-      {pieces.map((p) => (
-        <PatchGlyph
-          key={p.key}
-          patchId={p.patchId}
-          orientation={p.orientation}
-          x={p.c * 100}
-          y={p.r * 100}
-          cell={100}
-        />
-      ))}
-      {covered === 0 && (
-        <text x="450" y="470" textAnchor="middle" fontSize="60" fill="#B9A87F" fontWeight="600">
-          {t('g_empty')}
-        </text>
-      )}
       {frame && (
         <>
           <rect

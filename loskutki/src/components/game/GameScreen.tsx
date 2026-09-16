@@ -994,15 +994,11 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const boardNode = (
         <div className={tablet ? 'flex min-h-0 min-w-0 flex-1 items-center justify-center' : 'mt-1 flex min-h-0 flex-1 items-center justify-center'}>
           <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full' : `relative aspect-square max-h-full w-full ${bigPort ? 'max-w-none' : 'max-w-[520px]'}`}>
-            {/* v3.7.0: мой ход — лёгкая ПУЛЬСИРУЮЩАЯ подсветка по краям поля:
-                сразу видно, что шить сейчас мне, даже не читая надпись */}
-            {mySideNow && state.phase !== 'gameover' && (
-              <div
-                className="turn-glow pointer-events-none absolute -inset-1.5 z-0 rounded-[30px] border-[5px] border-primary/80"
-                aria-hidden
-              />
-            )}
+            {/* v3.9.0: подсветка «мой ход» — ЗЕЛЁНАЯ рамка-КВАДРАТ, рисуется
+                внутри svg полотна (см. QuiltBoard turnGlow): всегда точно
+                вокруг квадрата поля, каким бы ни был контейнер вокруг */}
             <QuiltBoard
+              turnGlow={mySideNow && state.phase !== 'gameover'}
               board={me.board}
               interactive={(placingNow || leatherHuman) && !busy && !onlineBusy && !dragActive}
               placing={quiltPlacing}
@@ -1175,7 +1171,10 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           className={`btn-wood mt-1 flex w-full items-center justify-between gap-2 rounded-xl px-3 ${
             tablet ? 'h-16' : bigPort ? 'h-14' : 'h-12'
           } ${
-            forcedAdvance && myTurn ? 'animate-pulse ring-3 ring-[#FFD98A]' : ''
+            /* v3.9.0: ставить нечего совсем — кнопка «Шагнуть вперёд»
+               выделяется ЗЕЛЁНОЙ пульсирующей рамкой (тот же цвет, что
+               подсветка поля при моём ходе) — ясно, что делать дальше */
+            forcedAdvance && myTurn ? 'adv-forced' : ''
           } ${hint && hint.action === 'advance' ? 'ring-4 ring-[#D9A13F]' : ''}`}
           aria-label={t('g_advance_aria', { from: me.time, to: advanceTo, n: advPreview.buttonGain })}
         >
