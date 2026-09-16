@@ -22,6 +22,9 @@ export interface MpSession {
   avatar: string;
   /** комната открыта для поиска (для плашки на экране ожидания) */
   isPublic?: boolean;
+  /** комната создана вызовом другу: экран ожидания показывает «Жду ответа…»,
+   *  считает 60 секунд и закрывается сам; отказ друга = крупное уведомление */
+  invite?: { uid: string; name: string; avatar: string; at: number };
 }
 
 export interface MpProfile {

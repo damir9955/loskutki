@@ -301,8 +301,18 @@ function GhostBadges({ x, y, cost, time }: { x: number; y: number; cost: number;
   );
 }
 
-/** Мини-превью доски (для панели соперницы) */
-export function MiniQuilt({ board, className }: { board: number[]; className?: string }) {
+/** Мини-превью доски (для панели соперницы и экрана сравнения).
+ *  frame — цвет рамки ПОЛЯ (рисуется внутри SVG, поэтому всегда облегает
+ *  квадрат полотна, как бы ни letterbox-ился сам svg-элемент) */
+export function MiniQuilt({
+  board,
+  className,
+  frame,
+}: {
+  board: number[];
+  className?: string;
+  frame?: string;
+}) {
   const pieces = useMemo(() => boardPieces(board), [board]);
   const covered = board.filter((v) => v !== -1).length;
   return (
@@ -330,6 +340,32 @@ export function MiniQuilt({ board, className }: { board: number[]; className?: s
         <text x="450" y="470" textAnchor="middle" fontSize="60" fill="#B9A87F" fontWeight="600">
           {t('g_empty')}
         </text>
+      )}
+      {frame && (
+        <>
+          <rect
+            x="7"
+            y="7"
+            width="886"
+            height="886"
+            rx="34"
+            fill="none"
+            stroke={frame}
+            strokeWidth="16"
+          />
+          <rect
+            x="26"
+            y="26"
+            width="848"
+            height="848"
+            rx="24"
+            fill="none"
+            stroke={frame}
+            strokeWidth="4"
+            strokeDasharray="20 14"
+            opacity="0.75"
+          />
+        </>
       )}
     </svg>
   );

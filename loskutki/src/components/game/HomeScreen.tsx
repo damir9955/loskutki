@@ -43,7 +43,7 @@ import { useOnline } from '@/lib/useOnline';
 import { APP_VERSION } from '@/lib/version';
 import { useFriends } from '@/lib/friends';
 import { formatFriendCode, mpJoin, mpListRooms, mpOnRooms, mpWsEnabled, type MpSession } from '@/lib/net';
-import { WS_URL_OVERRIDE_KEY, wsUrl, type OpenRoomInfo } from '@/lib/ws';
+import { type OpenRoomInfo } from '@/lib/ws';
 import { FriendsDialog } from './FriendsDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
@@ -692,7 +692,7 @@ export function HomeScreen({
         open={friendsOpen}
         onOpenChange={setFriendsOpen}
         onJoinRoom={(j, role) => {
-          const s2: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic };
+          const s2: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic, invite: j.invite };
           onJoinRoom?.(s2, role);
         }}
       />
@@ -938,37 +938,6 @@ function SettingsDialog({
     sound.tap();
     save({ lang: l });
   };
-  // — ручной адрес сервера онлайн-игры (новый Deno Deploy) —
-  const [srvOverride, setSrvOverride] = useState(() => {
-    try {
-      return (localStorage.getItem(WS_URL_OVERRIDE_KEY) ?? '').trim();
-    } catch {
-      return '';
-    }
-  });
-  const [srvInput, setSrvInput] = useState(srvOverride);
-  const effective = wsUrl();
-  const saveServer = () => {
-    const v = srvInput.trim().replace(/\/+$/, '');
-    // принимаем https://…, wss://…, ws://… или голое имя хоста
-    const ok =
-      v === '' ||
-      /^(https?|wss?):\/\/[^\s/$.?#].[^\s]*$/i.test(v) ||
-      (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(v) && !v.includes(' '));
-    if (!ok) {
-      toast({ title: t('set_server_bad'), description: t('set_server_h') });
-      return;
-    }
-    try {
-      if (v) localStorage.setItem(WS_URL_OVERRIDE_KEY, v);
-      else localStorage.removeItem(WS_URL_OVERRIDE_KEY);
-    } catch { /* приватный режим — просто игнорируем */ }
-    setSrvOverride(v);
-    toast({
-      title: v ? t('set_server_saved') : t('set_server_cleared'),
-      description: v ? t('set_server_saved_h') : t('set_server_h'),
-    });
-  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined} className="w-[min(94vw,420px)]">
@@ -1028,56 +997,6 @@ function SettingsDialog({
                 English
               </button>
             </div>
-          </div>
-          {/* адрес сервера онлайн-игры: пользователь может вписать свой
-              Deno Deploy (новый адрес после переезда на console.deno.com),
-              не трогая настройки Vercel */}
-          <div className="rounded-xl border-2 border-border bg-card/60 p-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[15.5px] font-extrabold">{t('set_server')}</div>
-                <div className="text-[12.5px] font-semibold text-muted-foreground">{t('set_server_h')}</div>
-              </div>
-              {srvOverride && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      localStorage.removeItem(WS_URL_OVERRIDE_KEY);
-                    } catch { /* ignore */ }
-                    setSrvOverride('');
-                    setSrvInput('');
-                    toast({ title: t('set_server_cleared'), description: t('set_server_h') });
-                  }}
-                  className="shrink-0 rounded-lg border-2 border-border bg-background px-2.5 py-1.5 text-[12px] font-extrabold text-foreground/70"
-                >
-                  {t('set_server_reset')}
-                </button>
-              )}
-            </div>
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-              <input
-                value={srvInput}
-                onChange={(e) => setSrvInput(e.target.value)}
-                placeholder={t('set_server_ph')}
-                inputMode="url"
-                autoComplete="off"
-                spellCheck={false}
-                className="min-w-0 rounded-lg border-2 border-border bg-background px-2.5 py-2 text-[13.5px] font-semibold text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={saveServer}
-                className="rounded-lg border-2 border-primary/60 bg-primary/90 px-3.5 py-2 text-[13px] font-extrabold text-primary-foreground"
-              >
-                {t('set_server_save')}
-              </button>
-            </div>
-            {effective && (
-              <div className="mt-1.5 truncate text-[11.5px] font-bold text-muted-foreground">
-                {t('set_server_current', { v: effective })}
-              </div>
-            )}
           </div>
           {/* мой постоянный ID для друзей — никогда не меняется
               (сброс прогресса его НЕ трогает) */}

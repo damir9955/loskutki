@@ -209,17 +209,17 @@ interface PatchSpec {
 const SPECS: PatchSpec[] = [
   { name: 'Полоска', cost: 2, time: 1, income: 0, color: '#C0603A', pattern: 'stripe', rows: ['##'] },
   { name: 'Лента', cost: 2, time: 2, income: 0, color: '#8AA06F', pattern: 'plain', rows: ['###'] },
-  { name: 'Кушак', cost: 3, time: 3, income: 1, color: '#D9A13F', pattern: 'diag', rows: ['####'] },
+  { name: 'Кушак', cost: 3, time: 3, income: 1, color: '#C4830D', pattern: 'diag', rows: ['####'] },
   { name: 'Шаль', cost: 7, time: 1, income: 1, color: '#8E5A79', pattern: 'dots', rows: ['#####'] },
   { name: 'Квадратик', cost: 6, time: 5, income: 2, color: '#3E7C74', pattern: 'weave', rows: ['##', '##'] },
-  { name: 'Галочка', cost: 2, time: 2, income: 0, color: '#EFE0BC', pattern: 'cross', rows: ['## ', '###'] },
+  { name: 'Галочка', cost: 2, time: 2, income: 0, color: '#4E5BA6', pattern: 'cross', rows: ['## ', '###'] },
   { name: 'Сапожок', cost: 10, time: 5, income: 3, color: '#A54628', pattern: 'diag', rows: ['##  ', '####'] },
   { name: 'Крылышки', cost: 7, time: 4, income: 2, color: '#5B7E9E', pattern: 'dots', rows: [' ## ', '####'] },
   { name: 'Молния', cost: 4, time: 2, income: 0, color: '#C08A3E', pattern: 'stripe', rows: ['### ', ' ###'] },
   { name: 'Тапочек', cost: 8, time: 6, income: 3, color: '#C0788A', pattern: 'weave', rows: [' ##', ' ##', '## '] },
   { name: 'Подкова', cost: 1, time: 2, income: 0, color: '#8B5E3C', pattern: 'check', rows: ['# #', '###'] },
   { name: 'Мостик', cost: 1, time: 5, income: 1, color: '#6E7F4F', pattern: 'diag', rows: ['#  #', '####'] },
-  { name: 'Рогатка', cost: 3, time: 6, income: 2, color: '#D9A13F', pattern: 'dots', rows: ['# #', '###', ' # '] },
+  { name: 'Рогатка', cost: 3, time: 6, income: 2, color: '#C4830D', pattern: 'dots', rows: ['# #', '###', ' # '] },
   { name: 'Топорик', cost: 2, time: 2, income: 0, color: '#C0603A', pattern: 'plain', rows: ['###', ' # '] },
   { name: 'Ключик', cost: 5, time: 5, income: 2, color: '#3E7C74', pattern: 'hatch', rows: ['###', ' # ', ' # '] },
   { name: 'Шпилька', cost: 7, time: 2, income: 2, color: '#8E5A79', pattern: 'stripe', rows: ['###', ' # ', ' # ', ' # '] },
@@ -227,10 +227,10 @@ const SPECS: PatchSpec[] = [
   { name: 'Уголок', cost: 4, time: 2, income: 1, color: '#C08A3E', pattern: 'check', rows: ['# ', '# ', '##'] },
   { name: 'Ступенька', cost: 4, time: 6, income: 2, color: '#5B7E9E', pattern: 'diag', rows: ['# ', '# ', '##'] },
   { name: 'Лестница', cost: 10, time: 3, income: 2, color: '#A54628', pattern: 'stripe', rows: ['# ', '# ', '# ', '##'] },
-  { name: 'Флажок', cost: 3, time: 4, income: 1, color: '#EFE0BC', pattern: 'dots', rows: ['# ', '# ', '##', '# '] },
+  { name: 'Флажок', cost: 3, time: 4, income: 1, color: '#963A55', pattern: 'dots', rows: ['# ', '# ', '##', '# '] },
   { name: 'Крестик', cost: 5, time: 4, income: 2, color: '#C0788A', pattern: 'cross', rows: [' # ', '###', ' # '] },
   { name: 'Якорь', cost: 1, time: 4, income: 1, color: '#6E7F4F', pattern: 'weave', rows: [' # ', ' # ', '###', ' # ', ' # '] },
-  { name: 'Гусеница', cost: 5, time: 3, income: 1, color: '#D9A13F', pattern: 'check', rows: [' ## ', '####', ' ## '] },
+  { name: 'Гусеница', cost: 5, time: 3, income: 1, color: '#C4830D', pattern: 'check', rows: [' ## ', '####', ' ## '] },
   { name: 'Молоточек', cost: 2, time: 3, income: 0, color: '#8B5E3C', pattern: 'hatch', rows: ['# #', '###', '# #'] },
   { name: 'Клаптик', cost: 3, time: 1, income: 0, color: '#C0603A', pattern: 'plain', rows: [' #', '##'] },
   { name: 'Крючок', cost: 1, time: 3, income: 0, color: '#8AA06F', pattern: 'dots', rows: [' #', '##'] },
@@ -238,7 +238,7 @@ const SPECS: PatchSpec[] = [
   { name: 'Зигзаг', cost: 7, time: 6, income: 3, color: '#8E5A79', pattern: 'hatch', rows: [' #', '##', '# '] },
   { name: 'Ручеёк', cost: 2, time: 3, income: 1, color: '#5B7E9E', pattern: 'diag', rows: [' #', ' #', '##', '# '] },
   { name: 'Хомуток', cost: 1, time: 2, income: 0, color: '#C08A3E', pattern: 'weave', rows: ['   #', '####', '#   '] },
-  { name: 'Стрекоза', cost: 2, time: 1, income: 0, color: '#EFE0BC', pattern: 'plain', rows: ['  # ', '####', ' #  '] },
+  { name: 'Стрекоза', cost: 2, time: 1, income: 0, color: '#3F7048', pattern: 'plain', rows: ['  # ', '####', ' #  '] },
   { name: 'Косичка', cost: 10, time: 4, income: 3, color: '#A54628', pattern: 'dots', rows: ['  #', ' ##', '## '] },
 ];
 
@@ -3439,10 +3439,25 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
       case 'fr_invite_decline': {
         const from = cleanUid(msg.uid);
         if (!ctx.uid || !from) throw 'badpayload';
+        const inv = await inviteGet(ctx.uid, from);
         await inviteDel(ctx.uid, from);
         frSnapInvalidate(ctx.uid);
         frSnapInvalidate(from);
-        pushFrA(from, { t: 'fr_invite_gone', from: ctx.uid });
+        // v3.7.0: отказ обрабатываем только пока приглашение ЖИВО — иначе
+        // «отказом» можно было бы закрыть чужую ждущую комнату задним числом
+        if (inv && Date.now() - inv.at <= INVITE_TTL_MS) {
+          // зовущий получает отдельное событие «отказался» (клиент покажет
+          // его КРУПНЫМИ буквами) + его ждущая комната закрывается,
+          // чтобы не висела в списке
+          const meCard = await touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
+          pushFrA(from, { t: 'fr_invite_declined', from: ctx.uid, name: meCard.name, avatar: meCard.avatar });
+          const hostRoom = await findWaitingRoomOfUidA(from);
+          if (hostRoom && hostRoom.code === inv.code) {
+            await removeMyWaitingRoomA(inv.code);
+            void pushRoomsA();
+          }
+          pushFrA(from, { t: 'fr_invite_gone', from: ctx.uid });
+        }
         respond(ctx, ref, { ok: true });
         return;
       }
@@ -3713,7 +3728,7 @@ export async function serverStatsA(): Promise<{
 /** Версия этого файла сервера. Видна снаружи (health-страница и GET
  *  /version) — чтобы всегда можно было проверить, какая версия реально
  *  задеплоена, не гадая по косвенным признакам. */
-export const SERVER_VERSION = 'v3.6.1';
+export const SERVER_VERSION = 'v3.7.0';
 
 /** health-страница: st=null — статистика не успела посчитаться (гонка с
  *  таймаутом), показываем базовую версию — главное, что сервер ответил. */

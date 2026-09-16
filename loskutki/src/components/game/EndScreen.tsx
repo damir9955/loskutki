@@ -171,53 +171,82 @@ export function EndScreen({
         </div>
       </div>
 
-      {/* ===== СРАВНЕНИЕ ПОЛОТЕН: оба крупно, моё сверху, соперника снизу ===== */}
+      {/* ===== СРАВНЕНИЕ ПОЛОТЕН: оба крупно, моё сверху, соперника снизу.
+           v3.7.0: заголовок крупный красный, поля с цветными рамками и
+           бейджами, всё гарантированно влезает в экран БЕЗ прокрутки
+           (доски делят свободную высоту поровну и letterbox-ятся) ===== */}
       {compare && (
         <div
-          className="fixed inset-0 z-[60] flex flex-col bg-[#2B2118]/92 backdrop-blur-md"
+          className="fixed inset-0 z-[60] flex flex-col bg-[#2B2118]/94 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-label={t('e_compare_title')}
           onClick={() => setCompare(false)}
         >
-          <div className="flex shrink-0 items-center justify-between px-4 pb-1.5 pt-[max(env(safe-area-inset-top),16px)]">
-            <div className="font-display text-[20px] text-foreground">{t('e_compare_title')}</div>
+          {/* заголовок — крупно и красным, чтобы сразу бросалось в глаза */}
+          <div className="flex shrink-0 items-center justify-between gap-2 px-4 pb-1 pt-[max(env(safe-area-inset-top),12px)]">
+            <div className="w-10" />
+            <div
+              className="font-display min-w-0 flex-1 text-center text-[25px] font-black uppercase leading-tight tracking-wide text-[#E04736]"
+              style={{ textShadow: '0 2px 0 rgba(0,0,0,.35)' }}
+            >
+              {t('e_compare_title')}
+            </div>
             <button
               type="button"
               onClick={() => setCompare(false)}
-              className="btn-cloth flex h-10 w-10 items-center justify-center rounded-xl"
+              className="btn-cloth flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
               aria-label={t('e_close')}
             >
               <X className="h-5 w-5" />
             </button>
           </div>
           <div
-            className="nice-scroll flex flex-1 flex-col items-center gap-4 overflow-y-auto px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-2"
+            className="flex min-h-0 flex-1 flex-col gap-2 px-3 pb-[max(env(safe-area-inset-bottom),10px)] pt-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* моё полотно — сверху */}
-            <div className="w-full max-w-[min(92vw,430px)]">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="text-[14px] font-extrabold text-primary uppercase tracking-wide">{t('e_you')}</span>
-                <span className={`text-[15px] font-extrabold ${my.total >= bot.total ? 'text-primary' : 'text-foreground/70'}`}>
+            {/* моё полотно — сверху, зелёная рамка и бейдж */}
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-center justify-between gap-2 pb-1">
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#7A9463] px-3 py-1 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-md">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-white/90" aria-hidden />
+                  <span className="truncate">{t('e_my_field')}</span>
+                </span>
+                <span
+                  className={`shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[15px] font-extrabold tabular-nums ${
+                    my.total >= bot.total ? 'text-[#B9D08F]' : 'text-white/60'
+                  }`}
+                >
                   {my.total > 0 ? '+' : ''}{my.total}
                 </span>
               </div>
-              <MiniQuilt board={state.players[0].board} className="w-full rounded-xl border-2 border-primary/40 shadow-lg" />
-            </div>
-            {/* полотно соперника — снизу */}
-            <div className="w-full max-w-[min(92vw,430px)]">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5 text-[14px] font-extrabold text-muted-foreground uppercase tracking-wide">
-                  {opponent ? <Portrait src={opponent.avatar} size={20} /> : <BotAvatar level={state.botLevel} size={20} />}
+              <div className="min-h-0 flex-1">
+                <MiniQuilt board={state.players[0].board} frame="#7A9463" className="h-full w-full" />
+              </div>
+            </section>
+            {/* полотно соперника — снизу, красная рамка и бейдж с именем */}
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-center justify-between gap-2 pb-1">
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-[#C33A2F] px-3 py-1 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-md">
+                  {opponent ? (
+                    <Portrait src={opponent.avatar} size={16} />
+                  ) : (
+                    <BotAvatar level={state.botLevel} size={16} />
+                  )}
                   <span className="truncate">{botName}</span>
                 </span>
-                <span className={`shrink-0 text-[15px] font-extrabold ${bot.total > my.total ? 'text-[#8a5a3a]' : 'text-foreground/70'}`}>
+                <span
+                  className={`shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[15px] font-extrabold tabular-nums ${
+                    bot.total > my.total ? 'text-[#F0A08F]' : 'text-white/60'
+                  }`}
+                >
                   {bot.total > 0 ? '+' : ''}{bot.total}
                 </span>
               </div>
-              <MiniQuilt board={state.players[1].board} className="w-full rounded-xl border-2 border-border shadow-lg" />
-            </div>
+              <div className="min-h-0 flex-1">
+                <MiniQuilt board={state.players[1].board} frame="#C33A2F" className="h-full w-full" />
+              </div>
+            </section>
           </div>
         </div>
       )}

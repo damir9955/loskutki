@@ -734,7 +734,7 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
             <div
               key={turnBanner}
               className={`banner-in flex items-center justify-center gap-1.5 font-extrabold tracking-wide ${
-                bigPort ? 'text-[12.5px]' : 'text-[10.5px]'
+                bigPort ? 'text-[14px]' : 'text-[12.5px]'
               } ${
                 mySideNow ? 'text-primary' : 'text-muted-foreground'
               }`}
@@ -994,6 +994,14 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
   const boardNode = (
         <div className={tablet ? 'flex min-h-0 min-w-0 flex-1 items-center justify-center' : 'mt-1 flex min-h-0 flex-1 items-center justify-center'}>
           <div ref={boardHostRef} className={tablet ? 'relative aspect-square max-h-full w-full' : `relative aspect-square max-h-full w-full ${bigPort ? 'max-w-none' : 'max-w-[520px]'}`}>
+            {/* v3.7.0: мой ход — лёгкая ПУЛЬСИРУЮЩАЯ подсветка по краям поля:
+                сразу видно, что шить сейчас мне, даже не читая надпись */}
+            {mySideNow && state.phase !== 'gameover' && (
+              <div
+                className="turn-glow pointer-events-none absolute -inset-1.5 z-0 rounded-[30px] border-[5px] border-primary/80"
+                aria-hidden
+              />
+            )}
             <QuiltBoard
               board={me.board}
               interactive={(placingNow || leatherHuman) && !busy && !onlineBusy && !dragActive}

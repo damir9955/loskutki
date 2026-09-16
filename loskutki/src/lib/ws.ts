@@ -4,8 +4,9 @@
  * WebSocket-транспорт онлайн-режима «Лоскутки».
  *
  * Подключается к серверу Deno Deploy. Адрес ВШИТ В СБОРКУ и работает из
- * коробки (DEFAULT_WS_URL ниже); NEXT_PUBLIC_WS_URL в настройках Vercel
- * и ручной адрес в Настройках игры могут его переопределить.
+ * коробки (DEFAULT_WS_URL ниже); NEXT_PUBLIC_WS_URL при сборке может его
+ * переопределить. Игроку адрес НЕ виден — сервером управляет только
+ * разработчик (правкой DEFAULT_WS_URL здесь или env на хостинге).
  *
  * Стабильность (главные правила):
  *  — запрос/ответ по ref: каждая mp* функция — это {ref, t, ...} и ответ
@@ -42,7 +43,7 @@ interface PendingReq {
 type ViewListener = (view: MpRoomView) => void;
 type RoomsListener = (rooms: OpenRoomInfo[]) => void;
 type StatusListener = (connected: boolean) => void;
-/** push-события друзей: {t:'fr_req'|'fr_ok'|'fr_gone'|'fr_msg'|'fr_invite'|'fr_invite_gone', ...} */
+/** push-события друзей: {t:'fr_req'|'fr_ok'|'fr_gone'|'fr_msg'|'fr_invite'|'fr_invite_gone'|'fr_invite_declined', ...} */
 type FriendsListener = (m: Record<string, unknown>) => void;
 
 /** тип сообщения-события друзей (см. deno/server.ts) */
@@ -52,7 +53,8 @@ export type FrEvent =
   | 'fr_gone'
   | 'fr_msg'
   | 'fr_invite'
-  | 'fr_invite_gone';
+  | 'fr_invite_gone'
+  | 'fr_invite_declined';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_JITTER_MS = 500;
@@ -62,32 +64,17 @@ const WATCHDOG_PING_MS = 10_000; // молчание сервера → шлём
 const WATCHDOG_KILL_MS = 25_000; // совсем глухое молчание → пересоздать сокет
 const IDLE_CLOSE_MS = 60_000; // нет подписок и запросов → закрыть сокет
 
-/** ключ localStorage с ручным адресом сервера (Настройки → «Сервер
- *  онлайн-игры»): адрес нового Deno Deploy можно вписать прямо в игре,
- *  не трогая переменные окружения Vercel. 'off'/'none' — выключить WS. */
-export const WS_URL_OVERRIDE_KEY = 'loskutki.wsUrl';
-
-/** АДРЕС СЕРВЕРА ОНЛАЙН-ИГРЫ ПО УМОЛЧАНИЮ — вшит в сборку, онлайн-режим
- *  работает из коробки без всяких настроек. Приоритет адреса:
- *  ручной (Настройки) → NEXT_PUBLIC_WS_URL (Vercel) → этот адрес.
- *  Меняется только если сервер переедет на другой домен. */
+/** АДРЕС СЕРВЕРА ОНЛАЙН-ИГРЫ — вшит в сборку, онлайн-режим работает
+ *  из коробки без всяких настроек. Приоритет адреса:
+ *  NEXT_PUBLIC_WS_URL (при сборке) → этот адрес.
+ *  Меняется только разработчиком — если сервер переедет на другой домен. */
 export const DEFAULT_WS_URL = 'wss://loskutki.damirkolmurzin.deno.net';
 
-function readOverride(): string {
-  try {
-    if (typeof window === 'undefined') return '';
-    return (window.localStorage.getItem(WS_URL_OVERRIDE_KEY) ?? '').trim();
-  } catch {
-    return '';
-  }
-}
-
 /** адрес WS-сервера. Пусто — WS-режим выключен (HTTP-роуты).
- *  Приоритет: ручной адрес из Настроек → NEXT_PUBLIC_WS_URL (Vercel,
- *  «off»/«none» — выключить) → DEFAULT_WS_URL (вшитый адрес). */
+ *  Приоритет: NEXT_PUBLIC_WS_URL («off»/«none» — выключить) →
+ *  DEFAULT_WS_URL (вшитый адрес). */
 export function wsUrl(): string {
-  let raw = readOverride();
-  if (!raw) raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
+  let raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
   if (!raw) raw = DEFAULT_WS_URL;
   if (/^(off|none|disabled)$/i.test(raw)) return '';
   let u = raw.replace(/\/+$/, '');

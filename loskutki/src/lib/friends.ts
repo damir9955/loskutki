@@ -87,9 +87,13 @@ export type FriendsUiEvent =
   | { kind: 'gone'; name: string }
   | { kind: 'msg'; from: string; name: string; text: string }
   | { kind: 'invite'; from: string; name: string }
-  | { kind: 'invite_gone'; from: string; name: string };
+  | { kind: 'invite_gone'; from: string; name: string }
+  /** друг ОТКАЗАЛСЯ от вызова (v3.7.0): зовущему — крупное уведомление,
+  *  сервер уже закрыл его ждущую комнату */
+  | { kind: 'invite_declined'; from: string; name: string; avatar: string };
 
-const INVITE_TTL_MS = 60_000;
+/** срок жизни приглашения — как на сервере (INVITE_TTL_MS) */
+export const INVITE_TTL_MS = 60_000;
 
 const EMPTY: FriendsState = {
   ready: false,
@@ -366,6 +370,19 @@ function handleServerEvent(m: Record<string, unknown>): void {
       state = { ...state, invites: state.invites.filter((i) => i.from.uid !== from) };
       emit();
       notifyUi({ kind: 'invite_gone', from, name });
+    }
+  } else if (t === 'fr_invite_declined') {
+    // v3.7.0: друг ответил отказом — сервер уже удалил приглашение и
+    // закрыл ждущую комнату зовущего; показываем крупное уведомление
+    const from = typeof m.from === 'string' ? m.from : '';
+    if (from) {
+      const friend = state.friends.find((f) => f.uid === from);
+      notifyUi({
+        kind: 'invite_declined',
+        from,
+        name: typeof m.name === 'string' && m.name ? m.name : friend?.name ?? '',
+        avatar: typeof m.avatar === 'string' && m.avatar ? m.avatar : friend?.avatar ?? 'ann',
+      });
     }
   }
 }

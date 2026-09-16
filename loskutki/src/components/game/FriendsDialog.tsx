@@ -51,7 +51,6 @@ import {
 import { loadStore, type FriendFoeStat } from '@/lib/storage';
 import { loadProfile, normalizeFriendCode } from '@/lib/net';
 import { ConfirmDialog } from './ConfirmDialog';
-import { Smartphone } from 'lucide-react';
 
 const INVITE_TTL_MS = 60_000;
 
@@ -62,6 +61,9 @@ export interface FriendsDialogJoin {
   avatar: string;
   /** комната приватная (создана приглашением) — для метки на экране ожидания */
   isPublic?: boolean;
+  /** v3.7.0: вызов другу — экрану ожидания нужно знать, КОГО ждём и сколько
+   *  («Жду ответа…», 60-секундный отсчёт, авто-закрытие) */
+  invite?: { uid: string; name: string; avatar: string; at: number };
 }
 
 interface FriendsDialogProps {
@@ -160,7 +162,8 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
     setBusy(false);
     if (res.ok && res.code && res.playerId) {
       const p = loadProfile();
-      toast({ title: t('fr_invite_sent'), description: t('fr_invite_sent_d') });
+      // карточка друга — экрану ожидания: «Жду ответа…» + 60-секундный отсчёт
+      const f = fr.friends.find((x) => x.uid === uid);
       onOpenChange(false);
       onJoinRoom?.(
         {
@@ -169,6 +172,7 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
           name: p.name,
           avatar: p.avatar,
           isPublic: false,
+          invite: f ? { uid: f.uid, name: f.name, avatar: f.avatar, at: Date.now() } : undefined,
         },
         'host',
       );
@@ -323,17 +327,6 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
           </div>
         ) : (
           <div className="space-y-3">
-            {/* сервер без базы: друзья и переписка живут в карманной копии
-                на устройстве и восстанавливаются на сервере автоматически */}
-            {fr.ready && !fr.persist && (
-              <div className="flex items-start gap-2.5 rounded-xl border-2 border-[#4C7A3F]/40 bg-[#4C7A3F]/8 p-3">
-                <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-[#3F6A34]" />
-                <div className="min-w-0">
-                  <div className="text-[13.5px] font-extrabold text-foreground">{t('fr_persist_t')}</div>
-                  <div className="mt-0.5 text-[11.5px] font-semibold text-muted-foreground">{t('fr_persist_d')}</div>
-                </div>
-              </div>
-            )}
             {/* Мой ID + добавить по ID */}
             <div className="stitched-card p-3.5">
               <div className="flex items-center justify-between gap-2">

@@ -62,11 +62,8 @@ const DICT: Record<string, [string, string]> = {
     'Download the game once — after that it works offline too',
   ],
   boot_retry: ['Подключиться и повторить', 'Connect and retry'],
-  boot_update_t: ['Обновляем игру', 'Updating the game'],
-  boot_update_d: [
-    'Скачиваем новую версию — это займёт немного времени',
-    'Downloading the new version — this will take a moment',
-  ],
+  // boot_update_* удалены: обновление теперь всегда фоновое, игрока
+  // ничем не останавливаем — блокирующего экрана «Обновляем игру» больше нет
   mp_offline_t: ['Нет интернета', 'No internet'],
   mp_offline_d: [
     'Подключитесь к интернету, чтобы играть онлайн',
@@ -74,8 +71,8 @@ const DICT: Record<string, [string, string]> = {
   ],
   mp_srvdown_t: ['Сервер онлайн-игры недоступен', 'Online game server is unreachable'],
   mp_srvdown_d: [
-    'Проверьте адрес: Настройки → «Сервер онлайн-игры»',
-    'Check the address: Settings → “Online game server”',
+    'Попробуйте ещё раз через пару минут',
+    'Please try again in a couple of minutes',
   ],
   mp_offline_wait: ['Ждём интернет…', 'Waiting for internet…'],
   home_quick: ['Быстрая игра', 'Quick match'],
@@ -124,6 +121,11 @@ const DICT: Record<string, [string, string]> = {
   mp_join_btn: ['Войти', 'Join'],
   mp_wait_title: ['Комната готова', 'Room is ready'],
   mp_wait_hint: ['Передайте код другу — он введёт его здесь, на экране «С другом»', 'Share the code with a friend — they enter it here on the "With a friend" screen'],
+  // v3.7.0: ожидание ответа на вызов другу
+  mp_wait_answer: ['Жду ответа…', 'Waiting for a reply…'],
+  mp_wait_answer_hint: ['Друг получил вызов и решает, принимать ли его', 'Your friend got the challenge and is deciding'],
+  mp_wait_answer_sec: ['{n} с', '{n}s'],
+  mp_invite_timeout: ['Друг не ответил — комната закрыта', 'No answer from your friend — the room is closed'],
   mp_copy: ['Скопировать код', 'Copy code'],
   mp_copied: ['Код скопирован', 'Code copied'],
   mp_wait_for: ['Ждём соперника…', 'Waiting for an opponent…'],
@@ -208,6 +210,11 @@ const DICT: Record<string, [string, string]> = {
   fr_invite_d: ['нажмите «Играть», чтобы начать', 'tap “Play” to start'],
   fr_invite_declined: ['{name} отклонил приглашение', '{name} declined the invite'],
   fr_invite_bad: ['Друг не принял приглашение вовремя — попробуйте ещё раз', 'The invite expired — try again'],
+  // v3.7.0: крупное уведомление зовущему при отказе друга
+  fr_declined_t: ['ВЫЗОВ ОТКЛОНЁН', 'CHALLENGE DECLINED'],
+  fr_declined_d: ['{name} отказался от битвы', '{name} declined the battle'],
+  fr_declined_room: ['Комната закрыта', 'The room is closed'],
+  fr_declined_ok: ['Понятно', 'Got it'],
   fr_challenge_t: ['Вызов на поединок!', 'Duel challenge!'],
   fr_challenge_d: ['{name} вызывает вас на поединок', '{name} challenges you to a duel'],
   fr_challenge_break: ['Текущая партия будет прервана', 'Your current game will be interrupted'],
@@ -244,11 +251,6 @@ const DICT: Record<string, [string, string]> = {
   fr_added_sent: ['Заявка отправлена', 'Request sent'],
   fr_stats_title: ['С друзьями', 'With friends'],
   fr_no_stats: ['Игр с друзьями пока не было', 'No games with friends yet'],
-  fr_persist_t: ['Копия — на устройстве', 'Backed up on this device'],
-  fr_persist_d: [
-    'Сервер работает без базы данных: друзья и переписка сохранены на этом устройстве и восстановятся на сервере автоматически. Подключать ничего не нужно.',
-    'The server runs without a database: friends and chats are saved on this device and restore to the server automatically. Nothing to set up.',
-  ],
   fr_remove_yes: ['Удалить', 'Remove'],
   c_cancel: ['Отмена', 'Cancel'],
 
@@ -280,25 +282,6 @@ const DICT: Record<string, [string, string]> = {
   set_lang_h: ['язык игры / game language', 'game language / язык игры'],
   set_version: ['Версия сборки: v{v}', 'Build version: v{v}'],
   set_privacy: ['Политика конфиденциальности', 'Privacy Policy'],
-  set_server: ['Сервер онлайн-игры', 'Online game server'],
-  set_server_h: [
-    'по умолчанию уже подключён — меняйте, только если сервер переедет',
-    'connected by default — change only if the server moves',
-  ],
-  set_server_ph: ['https://…', 'https://…'],
-  set_server_save: ['Сохранить', 'Save'],
-  set_server_reset: ['Сбросить', 'Reset'],
-  set_server_saved: ['Адрес сервера сохранён', 'Server address saved'],
-  set_server_saved_h: [
-    'Зайдите в онлайн-режим заново — игра подключится к нему',
-    'Re-enter online mode — the game will connect to it',
-  ],
-  set_server_cleared: ['Адрес сброшен к сборке', 'Address reset to the built-in one'],
-  set_server_bad: [
-    'Непонятный адрес — используйте вида https://имя.deno.net',
-    'Unclear address — use the form https://name.deno.net',
-  ],
-  set_server_current: ['Сейчас: {v}', 'Current: {v}'],
   set_reset: ['Сбросить прогресс', 'Reset progress'],
   set_reset_confirm: [
     'Стереть всю статистику, достижения и сохранённую партию?',
@@ -420,6 +403,7 @@ const DICT: Record<string, [string, string]> = {
   e_covered: ['закрыто {n}/81', 'covered {n}/81'],
   e_compare_hint: ['Нажмите на полотно, чтобы сравнить', 'Tap a quilt to compare'],
   e_compare_title: ['Сравнение полотен', 'Quilt comparison'],
+  e_my_field: ['Моё поле', 'My quilt'],
   e_close: ['Закрыть', 'Close'],
 
   // — хроника (структурированные коды) —

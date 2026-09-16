@@ -413,7 +413,16 @@ html[data-boot='ready'] .boot-veil {
     repeating-linear-gradient(-45deg, rgba(169, 133, 90, 0.10) 0 5px, transparent 5px 11px);
 }
 
+/* v3.7.0: пульс по краям полотна, когда ход игрока — сразу понятно,
+   чей ход, даже не вглядываясь в мелкую надпись над полем */
+@keyframes turn-glow {
+  0%, 100% { opacity: 0.38; box-shadow: 0 0 10px 1px rgba(192, 96, 58, 0.28); }
+  50% { opacity: 1; box-shadow: 0 0 26px 4px rgba(192, 96, 58, 0.55); }
+}
+.turn-glow { animation: turn-glow 1.5s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .track-popup, .pop-in, .piece-drop, .banner-in, .banner-glow, .confetti-piece { animation-duration: 0.01s !important; }
   .lint, .logo-float, .sway, .needle-run, .dot-online { animation: none !important; }
+  .turn-glow { animation: none !important; }
 }

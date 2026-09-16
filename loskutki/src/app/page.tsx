@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { XCircle } from 'lucide-react';
 import type { BotLevel } from '@/lib/game/constants';
 import type { GameState } from '@/lib/game/types';
 import { createGame } from '@/lib/game/engine';
@@ -11,7 +12,11 @@ import { MultiplayerScreen } from '@/components/game/MultiplayerScreen';
 import { OnlineGameScreen } from '@/components/game/OnlineGameScreen';
 import RulesDialog from '@/components/game/RulesDialog';
 import { BootGate } from '@/components/game/BootGate';
-import { sound } from '@/lib/sound';
+import { Portrait } from '@/components/game/MarketRow';
+import { avatarUrl } from '@/lib/avatars';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { sound, vibrate } from '@/lib/sound';
 import { loadStore, saveStore, todaySeedValue } from '@/lib/storage';
 import { loadSession, mpControl, saveSession, type MpSession } from '@/lib/net';
 import { frBoot, onFriendsUiEvent } from '@/lib/friends';
@@ -37,6 +42,16 @@ export default function Page() {
   useEffect(() => {
     mpPlayingRef.current = mpPlaying;
   }, [mpPlaying]);
+  /** зеркало session: колбэк «друг отказался» закрывает ждущую комнату —
+   *  нужен свежий объект без перестройки подписки */
+  const sessionRef = useRef(session);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+  /** v3.7.0: друг отказался от вызова — крупное уведомление поверх всего */
+  const [declined, setDeclined] = useState<{ name: string; avatar: string } | null>(null);
+  /** свежий отказ (uid + время): чтобы старый тост fr_invite_gone не дублировал */
+  const recentDeclineRef = useRef<{ uid: string; at: number } | null>(null);
 
   // синхронизация настроек звука при загрузке
   useEffect(() => {
@@ -48,6 +63,11 @@ export default function Page() {
   useEffect(() => {
     frBoot();
   }, []);
+
+  const updateSession = (s: MpSession | null) => {
+    setSession(s);
+    saveSession(s);
+  };
 
   // тосты о событиях друзей (заявка/сообщение/приглашение/принятие)
   useEffect(() => {
@@ -71,8 +91,11 @@ export default function Page() {
           break;
         case 'invite_gone': {
           // это видит ЗОВУЩИЙ: приглашение больше не ждёт ответа.
-          // Даём секунду: если друг ПРИНЯЛ — партия стартует (mpPlaying),
-          // и тост «отклонил» не нужен; иначе — честно сообщаем.
+          // Только для СТАРЫХ серверов (без события fr_invite_declined):
+          // даём секунду — если друг ПРИНЯЛ, партия стартует (mpPlaying),
+          // и тост не нужен; свежий отказ уже показан крупным попапом.
+          const rd = recentDeclineRef.current;
+          if (rd && rd.uid === e.from && Date.now() - rd.at < 6000) break;
           const name = e.name;
           if (name) {
             setTimeout(() => {
@@ -81,6 +104,18 @@ export default function Page() {
               }
             }, 1200);
           }
+          break;
+        }
+        case 'invite_declined': {
+          // v3.7.0: друг ОТКАЗАЛСЯ — сервер уже закрыл ждущую комнату.
+          // Зовущему показываем КРУПНОЕ уведомление и выходим из ожидания.
+          recentDeclineRef.current = { uid: e.from, at: Date.now() };
+          if (mpPlayingRef.current) break; // уже играем другую партию — не мешаем
+          if (sessionRef.current) updateSession(null);
+          sound.ensure();
+          sound.error();
+          vibrate([120, 60, 120], loadStore().settings.vibration);
+          setDeclined({ name: e.name, avatar: e.avatar });
           break;
         }
       }
@@ -120,11 +155,6 @@ export default function Page() {
       saveStore(store);
     }
     setGame(null);
-  };
-
-  const updateSession = (s: MpSession | null) => {
-    setSession(s);
-    saveSession(s);
   };
 
   /** вход в комнату из главного меню: баннер «ждёт игру» или приглашение
@@ -238,6 +268,51 @@ export default function Page() {
           inOnlineGame={!!session && mpPlaying}
           onAccepted={handleChallengeAccepted}
         />
+        {/* v3.7.0: друг ОТКАЗАЛСЯ от вызова — крупное уведомление.
+            Сервер уже закрыл комнату зовущего; здесь просто сообщаем */}
+        <Dialog open={!!declined}>
+          <DialogContent
+            aria-describedby={undefined}
+            showCloseButton={false}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+            className="grid-cols-[minmax(0,1fr)] w-[min(92vw,400px)] gap-0 overflow-hidden rounded-2xl border-2 border-[#C33A2F]/50 p-0"
+          >
+            <div className="flex flex-col items-center gap-1 px-5 pb-5 pt-6">
+              <XCircle className="pop-in h-16 w-16 text-[#C33A2F]" strokeWidth={2.2} />
+              {declined && (
+                <>
+                  <div className="pop-in mt-2 rounded-full border-2 border-[#B98A5A]/50 p-1 shadow-md">
+                    <Portrait src={avatarUrl(declined.avatar)} size={78} alt={declined.name} />
+                  </div>
+                  <div
+                    className="font-display mt-3 text-center text-[27px] leading-tight font-black uppercase tracking-wide text-[#C33A2F]"
+                    style={{ textShadow: '0 2px 0 rgba(0,0,0,.18)' }}
+                  >
+                    {t('fr_declined_t')}
+                  </div>
+                  <div className="mt-1 max-w-full text-center text-[16.5px] font-extrabold text-foreground">
+                    {t('fr_declined_d', { name: declined.name })}
+                  </div>
+                  <div className="mt-1 text-center text-[13px] font-bold text-muted-foreground">
+                    {t('fr_declined_room')}
+                  </div>
+                </>
+              )}
+              <Button
+                size="lg"
+                className="btn-wood mt-4 h-12 w-full rounded-xl text-[16px] font-extrabold"
+                onClick={() => {
+                  sound.tap();
+                  setDeclined(null);
+                }}
+              >
+                {t('fr_declined_ok')}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </main>
     </BootGate>
   );

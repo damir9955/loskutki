@@ -12,18 +12,17 @@
  *    в кэше service-воркера, интернет не нужен). Чтобы не мигать
  *    загрузкой при мгновенном старте, инлайн-скрипт в <head> ставит
  *    html[data-boot=ready] ДО гидрации и вуаль скрывается CSS-ом.
- *  — маркер есть + вышла новая версия: service-воркер сам скачивает
- *    обновление в фоне (незаметно), применяется при следующем запуске.
- *    ПОДСТРАХОВКА: при запуске сверяемся с /version.json на сервере
- *    (всегда из сети); если там версия новее, а на устройстве — старая
- *    (например, воркер не успел обновиться) — чистим кэш и перекачиваем
- *    игру сразу, с полоской загрузки. Замок на 60с страхует от циклов.
+ *  — маркер есть + на сервере новая версия: игра открывается СРАЗУ
+ *    и без задержек — играем на той, что уже на устройстве. Обновление
+ *    service-воркер качает В ФОНЕ, пока идёт партия, и применяет его
+ *    только при СЛЕДУЮЩЕМ запуске. Никаких блокирующих экранов, сноса
+ *    кэшей и перезагрузок: зависшее обновление больше не мешает играть.
  *  — нет интернета при первом запуске: экран «подключитесь к
  *    интернету» с кнопкой повторить.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { APP_VERSION, BOOT_MARKER_KEY, UPDATE_LOCK_KEY } from '@/lib/version';
+import { APP_VERSION, BOOT_MARKER_KEY } from '@/lib/version';
 import { t } from '@/lib/i18n';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
@@ -31,7 +30,6 @@ type BootState =
   | { kind: 'checking' }
   | { kind: 'ready' }
   | { kind: 'loading'; done: number; total: number }
-  | { kind: 'updating' }
   | { kind: 'error' };
 
 interface BootMarker {
@@ -72,22 +70,45 @@ function writeMarker() {
 }
 
 async function fetchIntoCache(cache: Cache, url: string): Promise<boolean> {
+  // таймаут 20с на файл: зависший запрос = «не скачалось», идём дальше,
+  // экран загрузки не висит вечно (докачается сама при игре онлайн)
   try {
-    const resp = await fetch(new Request(url, { credentials: 'omit' }));
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20_000);
+    let resp: Response | null = null;
+    try {
+      resp = await fetch(new Request(url, { credentials: 'omit' }), { signal: ctl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (resp && resp.ok) {
       await cache.put(new Request(url, { credentials: 'omit' }), resp);
       return true;
     }
   } catch {
-    /* попробуем дальше */
+    /* таймаут или сеть — попробуем следующие файлы */
   }
   return false;
 }
 
-/** сверка с сервером: там уже другая (новая) версия? — только онлайн,
- *  быстро (≤ 3.5с) и молча; любая ошибка = «не знаем, работаем дальше» */
-async function serverHasNewerBuild(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.onLine) return false;
+/** сравнение версий «3.8.0»: строго новее ли a, чем b? (старше — не трогаем,
+ *  чтобы сервер с предыдущей версией не «обновлял» устройство назад) */
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => Number.parseInt(n, 10));
+  const pb = b.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < 3; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) return true;
+    if (da < db) return false;
+  }
+  return false;
+}
+
+/** версия на сервере — только онлайн, быстро (≤ 3.5с) и молча;
+ *  любая ошибка = «не узнали, работаем дальше», никого не ждём */
+async function fetchServerVersion(): Promise<string | null> {
+  if (typeof navigator === 'undefined' || !navigator.onLine) return null;
   try {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 3500);
@@ -97,54 +118,32 @@ async function serverHasNewerBuild(): Promise<boolean> {
         cache: 'no-store',
         signal: ctl.signal,
       });
-      if (!resp.ok) return false;
+      if (!resp.ok) return null;
       const data = (await resp.json()) as { version?: string };
-      return typeof data.version === 'string' && data.version !== APP_VERSION;
+      return typeof data.version === 'string' ? data.version : null;
     } finally {
       clearTimeout(timer);
     }
   } catch {
-    return false;
+    return null;
   }
 }
 
-/** недавно уже обновлялись этим механизмом? (страховка от цикла) */
-function updateLocked(): boolean {
+/** ФОНОВОЕ ОБНОВЛЕНИЕ (ровно как просил пользователь): на сервере версия
+ *  строго новее — тихо просим service-воркер перепроверить себя. Новый
+ *  воркер скачивает всё ПОКА ИГРОК ИГРАЕТ на старой версии и включается
+ *  только при СЛЕДУЮЩЕМ запуске игры. Игру не блокируем, кэши не трогаем,
+ *  страницу не перезагружаем — если скачивание зависнет, игрок этого
+ *  просто не заметит: следующая попытка будет при новом запуске. */
+async function updateInBackground(): Promise<void> {
+  const serverV = await fetchServerVersion();
+  if (!serverV || !isNewer(serverV, APP_VERSION)) return;
   try {
-    const at = Number(localStorage.getItem(UPDATE_LOCK_KEY));
-    return Number.isFinite(at) && Date.now() - at < 60_000;
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
   } catch {
-    return false;
+    /* не получилось — воркер сам проверится при следующем запуске */
   }
-}
-
-/** на устройстве устаревшая сборка: сносим все кэши и маркер, просим
- *  воркер обновиться и перезапускаем страницу — игрок сразу получает
- *  свежую версию (с окном загрузки, как при первой установке) */
-async function selfUpdate(setState: (s: BootState) => void): Promise<void> {
-  setState({ kind: 'updating' });
-  try {
-    localStorage.setItem(UPDATE_LOCK_KEY, String(Date.now()));
-  } catch {
-    /* приватный режим — просто продолжаем */
-  }
-  try {
-    const keys = await caches.keys();
-    await Promise.all(keys.map((k) => caches.delete(k)));
-  } catch {
-    /* Cache Storage недоступен — страница перезагрузится всё равно */
-  }
-  try {
-    localStorage.removeItem(BOOT_MARKER_KEY);
-  } catch {
-    /* ignore */
-  }
-  try {
-    void (await navigator.serviceWorker?.getRegistration())?.update();
-  } catch {
-    /* ignore */
-  }
-  location.reload();
 }
 
 export function BootGate({ children }: { children: React.ReactNode }) {
@@ -204,7 +203,14 @@ export function BootGate({ children }: { children: React.ReactNode }) {
       const urls = new Set<string>(STATIC_URLS);
       let html = '';
       try {
-        const resp = await fetch(new Request('/', { credentials: 'omit', cache: 'no-store' }));
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 20_000);
+        let resp: Response | null = null;
+        try {
+          resp = await fetch(new Request('/', { credentials: 'omit', cache: 'no-store' }), { signal: ctl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
         if (resp && resp.ok) html = await resp.clone().text();
       } catch {
         /* офлайн уже проверили */
@@ -222,13 +228,17 @@ export function BootGate({ children }: { children: React.ReactNode }) {
       const total = urls.size;
       setState({ kind: 'loading', done: 0, total });
       let anyFail = false;
+      const startedAt = Date.now();
       for (const u of urls) {
         const ok = await fetchIntoCache(cache, u);
         if (!ok) anyFail = true;
         done++;
         setState({ kind: 'loading', done, total });
+        // общий дедлайн 90с: даже на очень плохой сети не держим игрока
+        // на экране загрузки — остальное докачается само при игре онлайн
+        if (Date.now() - startedAt > 90_000) break;
       }
-      if (anyFail && !navigator.onLine) {
+      if (anyFail && !navigator.onLine && done < total) {
         setState({ kind: 'error' });
         return;
       }
@@ -254,12 +264,9 @@ export function BootGate({ children }: { children: React.ReactNode }) {
       // setState — через микрозадачу (не синхронно в эффекте)
       void registerSw();
       queueMicrotask(() => setState({ kind: 'ready' }));
-      // ПОДСТРАХОВКА: воркер мог не успеть/не суметь обновиться —
-      // сверяем версию с сервером и при расхождении перекачиваемся
-      void (async () => {
-        if (updateLocked()) return;
-        if (await serverHasNewerBuild()) await selfUpdate(setState);
-      })();
+      // на сервере новее? — воркер перекачает игру в фоне, пока игрок
+      // играет; новая версия включится при следующем запуске
+      void updateInBackground();
       return;
     }
     queueMicrotask(() => void runFirstInstall());
@@ -303,20 +310,8 @@ export function BootGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // updating: на устройстве была устаревшая версия — перекачиваем
-  if (state.kind === 'updating') {
-    return (
-      <div className="linen-bg fixed inset-0 z-50 flex min-h-svh flex-col items-center justify-center px-8">
-        <div className="pop-in stitched-card flex w-full max-w-[380px] flex-col items-center px-6 py-8 text-center">
-          <RefreshCw className="h-10 w-10 animate-spin text-[#8B5E3C]" aria-hidden />
-          <div className="font-display mt-4 text-[22px] text-foreground">{t('boot_update_t')}</div>
-          <p className="mt-2 text-[13.5px] font-semibold text-muted-foreground">{t('boot_update_d')}</p>
-        </div>
-      </div>
-    );
-  }
-
-  // loading: окно с полоской
+  // loading: окно с полоской (только ПЕРВАЯ установка — обновления
+  // всегда фоновые и игрока не останавливают)
   const pct = state.total > 0 ? Math.min(100, Math.round((state.done / state.total) * 100)) : 4;
   return (
     <div className="linen-bg fixed inset-0 z-50 flex min-h-svh flex-col items-center justify-center px-8">

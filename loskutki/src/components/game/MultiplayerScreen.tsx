@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Copy, Check, LogIn, Plus, RefreshCw, UserRoundPlus, Users, Zap } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Hourglass, LogIn, Plus, RefreshCw, UserRoundPlus, Users, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Portrait } from './MarketRow';
@@ -46,7 +46,7 @@ import type { MpRoomView } from '@/lib/game/types';
 import { sound } from '@/lib/sound';
 import { useToast } from '@/hooks/use-toast';
 import type { OpenRoomInfo } from '@/lib/ws';
-import { useFriends } from '@/lib/friends';
+import { INVITE_TTL_MS, useFriends } from '@/lib/friends';
 import { FriendsDialog } from './FriendsDialog';
 import { useOnline } from '@/lib/useOnline';
 import { ServerCrash, WifiOff } from 'lucide-react';
@@ -186,6 +186,42 @@ export function MultiplayerScreen({
     };
 
   }, [session?.code, waiting]);
+
+  // ===== v3.7.0: приглашение другу — «Жду ответа…» + авто-закрытие =====
+  // Комната, созданная вызовом другу, не должна висеть вечно: если за 60
+  // секунд (срок жизни приглашения) друг не ответил — закрываем её сами.
+  const invAt = session?.invite?.at;
+  const [inviteLeft, setInviteLeft] = useState(() =>
+    invAt ? Math.max(0, Math.ceil((invAt + INVITE_TTL_MS - Date.now()) / 1000)) : 0,
+  );
+  useEffect(() => {
+    if (!invAt || !waiting || !session) return;
+    let stop = false;
+    const id = setInterval(() => {
+      if (stop) return;
+      const left = Math.max(0, Math.ceil((invAt + INVITE_TTL_MS - Date.now()) / 1000));
+      setInviteLeft(left);
+      // партия уже началась (друг принял) — отсчёт больше не нужен
+      if (left > 0 || playingNotified.current) return;
+      stop = true;
+      clearInterval(id);
+      void (async () => {
+        try {
+          await mpControl({ code: session.code, playerId: session.playerId, op: 'cancel' });
+        } catch {
+          /* комната могла уже закрыться */
+        }
+        onSessionChange(null);
+        setWaiting(false);
+        sound.error();
+        toast({ title: t('mp_invite_timeout') });
+      })();
+    }, 500);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [invAt, waiting, session?.code]);
 
   // ===== список открытых комнат (пока не ждём и не ищем) =====
   useEffect(() => {
@@ -588,30 +624,70 @@ export function MultiplayerScreen({
               {t('mp_reconnect')}
             </div>
           )}
-          <div className="text-[13px] font-extrabold tracking-wide text-muted-foreground uppercase">
-            {t('mp_code_ph')}
-          </div>
-          <div
-            className="font-display mt-2 text-[44px] leading-none tracking-[0.18em] text-foreground"
-            style={{ textShadow: '0 2px 0 rgba(169,133,90,.25)' }}
-          >
-            {session.code}
-          </div>
-          <button
-            type="button"
-            onClick={() => void copyCode()}
-            className="btn-cloth mt-4 flex items-center gap-2 rounded-full px-4 py-2.5 text-[14px] font-extrabold"
-          >
-            {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
-            {copied ? t('mp_copied') : t('mp_copy')}
-          </button>
-          <div className="mt-4 flex items-center gap-1.5 rounded-full bg-[#D9A13F]/15 px-3 py-1.5 text-[12px] font-bold text-[#8A5E13]">
-            {session.isPublic !== false ? <Users className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
-            {t(session.isPublic !== false ? 'mp_room_public' : 'mp_room_private')}
-          </div>
-          <div className="mt-4 text-center text-[12.5px] font-semibold text-muted-foreground">
-            {t('mp_wait_hint')}
-          </div>
+
+          {session.invite ? (
+            /* ===== v3.7.0: вызов другу — «Жду ответа…» с отсчётом ===== */
+            <>
+              <div className="relative">
+                <span className="absolute -inset-2 animate-ping rounded-full bg-primary/20" aria-hidden />
+                <div className="relative rounded-full border-2 border-[#B98A5A]/50 p-1 shadow-md">
+                  <Portrait src={avatarUrl(session.invite.avatar)} size={86} alt={session.invite.name} />
+                </div>
+              </div>
+              <div className="mt-2.5 max-w-full truncate text-[19px] font-extrabold text-foreground">
+                {session.invite.name}
+              </div>
+              <div className="mt-3 flex items-center gap-2 rounded-full bg-primary/15 px-4 py-2">
+                <Hourglass className="h-4.5 w-4.5 shrink-0 text-primary" />
+                <span className="text-[16px] font-extrabold uppercase tracking-wide text-primary">
+                  {t('mp_wait_answer')}
+                </span>
+              </div>
+              <div className="mt-2 text-[19px] font-extrabold tabular-nums text-foreground">
+                {t('mp_wait_answer_sec', { n: inviteLeft })}
+              </div>
+              <div className="mt-2 max-w-[300px] text-center text-[12.5px] font-semibold text-muted-foreground">
+                {t('mp_wait_answer_hint')}
+              </div>
+              {/* код — компактно: друг может войти и вручную */}
+              <button
+                type="button"
+                onClick={() => void copyCode()}
+                className="btn-cloth mt-4 flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-extrabold"
+              >
+                {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                <span className="tracking-[0.14em]">{session.code}</span>
+              </button>
+            </>
+          ) : (
+            /* ===== обычная комната по коду — крупный код ===== */
+            <>
+              <div className="text-[13px] font-extrabold tracking-wide text-muted-foreground uppercase">
+                {t('mp_code_ph')}
+              </div>
+              <div
+                className="font-display mt-2 text-[44px] leading-none tracking-[0.18em] text-foreground"
+                style={{ textShadow: '0 2px 0 rgba(169,133,90,.25)' }}
+              >
+                {session.code}
+              </div>
+              <button
+                type="button"
+                onClick={() => void copyCode()}
+                className="btn-cloth mt-4 flex items-center gap-2 rounded-full px-4 py-2.5 text-[14px] font-extrabold"
+              >
+                {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                {copied ? t('mp_copied') : t('mp_copy')}
+              </button>
+              <div className="mt-4 flex items-center gap-1.5 rounded-full bg-[#D9A13F]/15 px-3 py-1.5 text-[12px] font-bold text-[#8A5E13]">
+                {session.isPublic !== false ? <Users className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+                {t(session.isPublic !== false ? 'mp_room_public' : 'mp_room_private')}
+              </div>
+              <div className="mt-4 text-center text-[12.5px] font-semibold text-muted-foreground">
+                {t('mp_wait_hint')}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="mt-6 flex items-center gap-3">
@@ -622,13 +698,15 @@ export function MultiplayerScreen({
           </div>
         </div>
 
-        <div className="mt-7 flex items-center gap-2 text-[14px] font-extrabold text-muted-foreground">
-          <span className="relative flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-primary" />
-          </span>
-          {t('mp_wait_for')}
-        </div>
+        {!session.invite && (
+          <div className="mt-7 flex items-center gap-2 text-[14px] font-extrabold text-muted-foreground">
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-primary" />
+            </span>
+            {t('mp_wait_for')}
+          </div>
+        )}
 
         <div className="flex-1" />
         <button
@@ -880,7 +958,7 @@ export function MultiplayerScreen({
         open={friendsOpen}
         onOpenChange={setFriendsOpen}
         onJoinRoom={(j) => {
-          const s: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic };
+          const s: MpSession = { playerId: j.playerId, code: j.code, name: j.name, avatar: j.avatar, isPublic: j.isPublic, invite: j.invite };
           onSessionChange(s);
           setWaiting(true);
         }}
