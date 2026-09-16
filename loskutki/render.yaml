@@ -1,0 +1,32 @@
+# Render Blueprint: сервер мультиплеера «Лоскутки» за один клик.
+#
+# КАК ЗАПУСТИТЬ (бесплатно, без карты):
+#   1. Залейте этот репозиторий на GitHub
+#   2. https://dashboard.render.com → New → Blueprint → выберите репозиторий
+#      (Render прочитает этот файл и предложит создать сервис loskutki-server)
+#   3. План выбирайте Free. Переменные D1_* можно оставить пустыми —
+#      сервер заработает в режиме памяти; чтобы друзья и чаты переживали
+#      перезапуск, впишите значения Cloudflare D1 (README, «Хранилище»)
+#   4. Готово: адрес вида https://loskutki-server-xxxx.onrender.com —
+#      впишите его в игре: Настройки → «Сервер онлайн-игры»
+#
+# НЮАНС бесплатного плана: сервис засыпает после 15 минут тишины и
+# просыпается ~минуту. Чтобы он не засыпал, добавьте бесплатный пинг
+# раз в 5 минут (cron-job.org → URL https://ваш-сервер.onrender.com/).
+# Данные при «сне» не теряются, если подключено хранилище D1.
+
+services:
+  - type: web
+    name: loskutki-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile.server
+    plan: free
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: D1_ACCOUNT_ID
+        sync: false
+      - key: D1_DATABASE_ID
+        sync: false
+      - key: D1_API_TOKEN
+        sync: false

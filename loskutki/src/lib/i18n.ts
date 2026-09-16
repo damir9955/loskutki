@@ -246,8 +246,8 @@ const DICT: Record<string, [string, string]> = {
   fr_no_stats: ['Игр с друзьями пока не было', 'No games with friends yet'],
   fr_persist_t: ['Данные не сохраняются', 'Data is not being saved'],
   fr_persist_d: [
-    'На сервере не подключена база: друзья и переписка пропадут после простоя сервера. Подключите Deno KV: Settings → Databases → Provision Database, затем redeploy.',
-    'The server has no database attached: friends and chats will disappear after server idle. Attach Deno KV: Settings → Databases → Provision Database, then redeploy.',
+    'На сервере не подключена база: друзья и переписка пропадут после простоя сервера. Подключите бесплатную базу — Cloudflare D1 (если KV-база Deno занята) или Deno KV. Пошагово — в README, раздел «Хранилище».',
+    'The server has no database attached: friends and chats will disappear after server idle. Attach a free database — Cloudflare D1 (if your Deno KV slot is taken) or Deno KV. See README, section «Хранилище».',
   ],
   fr_remove_yes: ['Удалить', 'Remove'],
   c_cancel: ['Отмена', 'Cancel'],

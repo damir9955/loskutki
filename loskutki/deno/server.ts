@@ -1,6 +1,21 @@
 /**
- * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера для Deno Deploy (v3.4.0).
+ * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера (v3.5.0).
  * ============================================================
+ *
+ * v3.5.0 — ХРАНИЛИЩЕ БЕЗ DENO KV: Cloudflare D1 (бесплатно, без карты):
+ *   — если KV-база Deno Deploy занята (бесплатный план даёт всего
+ *     ОДНУ базу на аккаунт), сервер теперь умеет хранить комнаты,
+ *     друзей, переписку и ID игроков в БЕСПЛАТНОЙ базе Cloudflare D1;
+ *   — включается ТРЕМЯ переменными окружения (инструкция ниже),
+ *     данные переживают перезапуск и новый деплой точно так же;
+ *   — приоритет хранилища: Cloudflare D1 (если заданы D1_*) →
+ *     Deno KV (если база подключена) → оперативная память;
+ *   — CAS-семантика сохранена полностью: одновременные ходы из
+ *     разных изолятов не теряются (WHERE ver = N вместо versionstamp);
+ *   — для внешнего REST-хранилища растянуты интервалы «присутствия»
+ *     (записей меньше, индикаторы «на связи» не пострадали);
+ *   — индикатор «на связи» учитывает живые сокеты, а не только
+ *     свежесть записи в базе.
  *
  * v3.4.0 — ЧАТ ПАРТИИ + ЗАЩИТА «САМ К СЕБЕ» + hostUid В ЛОББИ:
  *   — новая команда 'chat' {code, playerId, text}: переписка с соперником
@@ -27,30 +42,57 @@
  *      → «New Playground» (весь сайт игры живёт на Vercel, здесь нужен
  *      только этот один файл)
  *   2. Удали содержимое main.ts и вставь ВЕСЬ этот файл целиком
- *   3. Нажми «Deploy» — внизу в BUILD LOGS все шаги должны позеленеть
- *      (Warm up проходит всегда: HTTP-сервер поднимается первым)
- *   4. ЧТОБЫ КОМНАТЫ ПЕРЕЖИВАЛИ ПЕРЕЗАПУСК, подключи базу (1 раз):
- *      Settings приложения → Databases → «Attach Database» →
- *      «Provision Database» → движок Deno KV → выбрать регион → Create.
- *      Без базы сервер работает в режиме памяти (деплой НЕ падает,
- *      но после паузы комнаты/друзья сбрасываются).
- *   5. Адрес из шапки редактора (https://<имя>...) впиши в игре:
+ *   3. ЧТОБЫ КОМНАТЫ, ДРУЗЬЯ И ЧАТЫ ПЕРЕЖИВАЛИ ПЕРЕЗАПУСК — подключи
+ *      бесплатную базу (деплой проходит и без неё, но данные будут
+ *      сбрасываться при простое). ДВА варианта на выбор:
+ *
+ *      ВАРИАНТ А — Cloudflare D1 (бесплатно, БЕЗ карты; для случая,
+ *      когда единственная KV-база Deno уже занята другим проектом):
+ *        а) https://dash.cloudflare.com → Sign up (нужен только e-mail)
+ *        б) Storage & Databases → D1 SQL Database → Create database →
+ *           имя loskutki → регион Western Europe → Create
+ *        в) вкладка Console → вставь и Run:
+ *             create table if not exists loskutki_kv (
+ *               k text primary key,
+ *               v text not null,
+ *               ver integer not null
+ *             );
+ *        г) на странице базы скопируй Database ID (UUID); на главной
+ *           панели Cloudflare (справа) — Account ID
+ *        д) My Profile → API Tokens → Create Token → Custom token →
+ *           Permissions: Account | D1 | Edit → Continue → Create →
+ *           скопируй токен (показывается один раз)
+ *        е) в Playground: Settings → Environment Variables → добавь три:
+ *             D1_ACCOUNT_ID  = <Account ID>
+ *             D1_DATABASE_ID = <Database ID>
+ *             D1_API_TOKEN   = <токен>
+ *        ж) Deploy → в логах: «Хранилище: Cloudflare D1»
+ *
+ *      ВАРИАНТ Б — Deno KV (если база свободна): Settings приложения →
+ *        Databases → Attach Database → Provision Database (Deno KV).
+ *
+ *   4. Адрес из шапки редактора (https://<имя>...) впиши в игре:
  *      Настройки → «Сервер онлайн-игры» → Сохранить. Либо задай
  *      переменную NEXT_PUBLIC_WS_URL = https://<имя>... на Vercel.
- *   6. Проверка: открой адрес сервера в браузере — увидишь страницу
- *      «Лоскутки: сервер онлайн» (строка «Хранение» покажет, подключён
- *      ли Deno KV).
+ *   5. Проверка: открой адрес сервера в браузере — увидишь страницу
+ *      «Лоскутки: сервер онлайн» (строка «Хранение» покажет, подключена
+ *      ли база и какая именно).
+ *   6. Запасной хостинг (если Deno Deploy недоступен): этот же файл
+ *      работает в Docker — в архиве игры есть Dockerfile.server и
+ *      render.yaml (Render.com, бесплатный план; подойдёт и Koyeb).
  *
  * ЧТО ВНУТРИ:
  *   — Deno.serve() поднимается МОМЕНТАЛЬНО (требование новой платформы:
- *     этап «Warm up» ждёт HTTP-сервер), KV подключается следом и не
- *     может заблокировать запуск;
- *   — комнаты хранятся в Deno KV: ПЕРЕЖИВАЮТ перезапуск и новый деплой
- *     (игрок, вернувшись по коду комнаты, застаёт партию на месте);
- *     в bun-тестах и без KV — режим оперативной памяти;
+ *     этап «Warm up» ждёт HTTP-сервер), хранилище подключается следом
+ *     и не может заблокировать запуск;
+ *   — приоритет хранилища: Cloudflare D1 (D1_* в окружении) → Deno KV
+ *     → оперативная память; комнаты ПЕРЕЖИВАЮТ перезапуск и новый
+ *     деплой (игрок, вернувшись по коду комнаты, застаёт партию
+ *     на месте); в bun-тестах и без базы — режим оперативной памяти;
  *   — валидация ходов на сервере (чередование, деньги, свободные клетки);
- *   — запись ходов по CAS (versionstamp): одновременные ходы из разных
- *     изолятов Deno не теряются и не перетирают друг друга;
+ *   — запись ходов по CAS (versionstamp в KV / WHERE ver = N в D1):
+ *     одновременные ходы из разных изолятов не теряются и не
+ *     перетирают друг друга;
  *   — мгновенная рассылка состояния обоим игрокам после каждого события
  *     (между изолятами — через BroadcastChannel);
  *   — ping-pong: сервер пингует каждые 3с, «мёртвый» сокет закрывается
@@ -58,7 +100,7 @@
  *   — переподключение: клиент шлёт state с кодом комнаты и playerId
  *     (сессия в localStorage) — сервер высылает ПОЛНОЕ состояние;
  *   — быстрый матч (quick match): два искателя сводятся в одну комнату;
- *   — друзья: заявки по ID, чат, приглашения (хранение в KV);
+ *   — друзья: заявки по ID, чат, приглашения (хранение в D1/KV);
  *   — авто-просрочка ходов (3 минуты) с паузой, если владелец не на связи;
  *   — GET / — страница «сервер онлайн» + CORS для браузера.
  *
@@ -919,6 +961,16 @@ function ownerSocketAlive(room: MpRoom, owner: number): boolean {
   }
   return false;
 }
+
+/** есть ли у игрока (по uid) живой сокет в ЭТОМ изоляте — индикатор
+ *  «в сети» в списке друзей: сокет надёжнее свежести записи в базе
+ *  (внешнее хранилище обновляется реже — см. effFrOnlineMs) */
+function uidOnLiveSocket(uid: string): boolean {
+  for (const s of sockets.values()) {
+    if (s.alive && s.uid === uid) return true;
+  }
+  return false;
+}
 const ROOM_TTL_MS = 30 * 60_000; // брошенные партии чистим через 30 минут
 const WAITING_HOST_TTL_MS = 5 * 60_000; // ждущая комната без хоста живёт 5 минут
 const ROOM_CHAT_CAP = 60; // сообщений в чате партии (лимит значения KV ~64КБ)
@@ -1098,6 +1150,41 @@ interface ChanLike {
 let kv: KvLike | null = null;
 let chan: ChanLike | null = null;
 let kvOn = false;
+/** хранилище — внешний по HTTP (Cloudflare D1): интервалы присутствия
+ *  растягиваем, чтобы не жечь дневную квоту записей (см. eff*-функции) */
+let remoteStore = false;
+
+/** каким хранилищем пользуемся — для health-страницы и логов */
+export function storageKind(): 'd1' | 'denokv' | 'memory' {
+  if (!kv) return 'memory';
+  return (kv as { kind?: string }).kind === 'd1' ? 'd1' : 'denokv';
+}
+
+// ---------- эффективные интервалы (растянутые для REST-хранилища) ----------
+// Д1 — это SQL по HTTPS: каждая запись = HTTP-запрос. Присутствие
+// («на связи»/«в сети») обновляем реже, а пороги проверок — шире,
+// чтобы индикаторы оставались честными при меньшем числе записей.
+
+/** как часто сокет с uid освежает профиль друга (15с → 45с) */
+function effFrTouchMs(): number {
+  return remoteStore ? 45_000 : FR_TOUCH_MS;
+}
+/** минимальный интервал записи профиля друга (10с → 40с) */
+function effFrUserWriteMs(): number {
+  return remoteStore ? 40_000 : FR_USER_WRITE_MS;
+}
+/** «в сети» в списке друзей (50с → 120с) */
+function effFrOnlineMs(): number {
+  return remoteStore ? 120_000 : FR_ONLINE_MS;
+}
+/** запись присутствия в комнате дворником (30с → 60с) */
+function effPresenceSaveMs(): number {
+  return remoteStore ? 60_000 : PRESENCE_SAVE_MS;
+}
+/** «живая» комната в лобби (20с → 75с) */
+function effListAliveMs(): number {
+  return remoteStore ? 75_000 : LIST_ALIVE_MS;
+}
 
 /** «Ворот готовности KV»: при старте сервера KV подключается асинхронно
  *  ПОСЛЕ Deno.serve (иначе этап Warm up новой платформы Deno Deploy
@@ -1134,6 +1221,7 @@ const PRESENCE_SAVE_MS = 30_000;
 export function initPersistence(k: KvLike | null, c: ChanLike | null): void {
   kv = k;
   kvOn = k !== null;
+  remoteStore = k !== null && (k as { remote?: boolean }).remote === true;
   chan = c;
   if (c) {
     c.onmessage = (ev) => {
@@ -1141,6 +1229,269 @@ export function initPersistence(k: KvLike | null, c: ChanLike | null): void {
         void handleChanMessage(ev.data);
       } catch { /* ignore */ }
     };
+  }
+}
+
+// ============================================================
+// 3.6. ВНЕШНЕЕ ХРАНИЛИЩЕ БЕЗ DENO KV: Cloudflare D1 (SQL по HTTPS)
+// ============================================================
+// Бесплатный план Deno Deploy даёт всего ОДНУ KV-базу на аккаунт —
+// если она занята другим проектом, включается этот адаптер: те же
+// ключи ['room', код] / ['fr_*', ...] ложатся в таблицу Cloudflare D1
+// (бесплатно, без карты; лимиты: 5 млн чтений и 100 000 записей строк
+// в день — с огромным запасом для игры). Семантика KvLike соблюдена:
+//   • get(strong)  — живой SELECT (кэша нет: ходы и друзья — только
+//     свежее, как consistency:'strong' в Deno KV);
+//   • list(prefix) — SELECT по диапазону ключей; eventual-чтения лобби
+//     кэшируются на 4с (пуши лобби идут каждые 3с, дворник — каждые 2с:
+//     без кэша это сотни тысяч чтений в день), strong — всегда мимо кэша;
+//   • atomic().check(ver).set/delete() — CAS: UPDATE/DELETE … WHERE
+//     ver = N (роль versionstamp играет счётчик версий строки);
+//   • atomic().check(null).set() — «создать только если нет»:
+//     INSERT … ON CONFLICT DO NOTHING (0 изменений = конфликт);
+//   • atomic() без check — мульти-UPSERT / DELETE WHERE k IN (…)
+//     одним оператором (атомарно, как в Deno KV).
+// Таблица создаётся один раз в консоли D1 (см. шапку файла):
+//   create table if not exists loskutki_kv (
+//     k text primary key, v text not null, ver integer not null);
+
+/** базовый URL API Cloudflare (в тестах подменяется на локальный мок) */
+const D1_API_BASE_DEFAULT = 'https://api.cloudflare.com/client/v4';
+/** окно кэша eventual-списков (лобби + дворник делят один SELECT) */
+const D1_LIST_CACHE_MS = 4_000;
+
+interface D1Config {
+  accountId: string;
+  databaseId: string;
+  apiToken: string;
+  apiBase?: string;
+}
+
+/** собрать конфиг D1 из переменных окружения (D1_ACCOUNT_ID,
+ *  D1_DATABASE_ID, D1_API_TOKEN; D1_API_BASE — только для тестов).
+ *  Нет хотя бы одной из трёх обязательных → null (хранилище выключено). */
+export function d1ConfigFromEnv(env: { get(k: string): string | undefined }): D1Config | null {
+  const accountId = (env.get('D1_ACCOUNT_ID') ?? '').trim();
+  const databaseId = (env.get('D1_DATABASE_ID') ?? '').trim();
+  const apiToken = (env.get('D1_API_TOKEN') ?? '').trim();
+  if (!accountId || !databaseId || !apiToken) return null;
+  return { accountId, databaseId, apiToken, apiBase: env.get('D1_API_BASE') || undefined };
+}
+
+/** ключ KvLike → строка таблицы: части склеены '~' (разделитель не
+ *  встречается в кодах комнат, uid и префиксах — проверяем на всякий) */
+function d1KeyId(key: KvKey): string {
+  const parts = key.map((p) => String(p));
+  for (const p of parts) {
+    if (p.includes('~')) throw new Error(`D1: символ '~' в ключе: ${JSON.stringify(key)}`);
+  }
+  return parts.join('~');
+}
+
+/** экранирование для LIKE … ESCAPE '\' */
+function d1EscapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => '\\' + c);
+}
+
+/** билдер атомарной операции (цепочка check/set/delete → commit) */
+class D1Atomic implements KvAtomic {
+  private ops: Array<{ t: 'set'; k: KvKey; v: unknown } | { t: 'del'; k: KvKey }> = [];
+  private checkOp: { key: KvKey; versionstamp: string | null } | null = null;
+  constructor(private store: D1Kv) {}
+  check(c: { key: KvKey; versionstamp: string | null }): KvAtomic {
+    this.checkOp = c;
+    return this;
+  }
+  set(k: KvKey, v: unknown): KvAtomic {
+    this.ops.push({ t: 'set', k, v });
+    return this;
+  }
+  delete(k: KvKey): KvAtomic {
+    this.ops.push({ t: 'del', k });
+    return this;
+  }
+  async commit(): Promise<{ ok: boolean }> {
+    return this.store.commitOps(this.checkOp, this.ops);
+  }
+}
+
+/** KvLike поверх Cloudflare D1 (SQL по REST). Никаких Deno-API —
+ *  работает и под bun (тесты подключают его в реплику). */
+export class D1Kv implements KvLike {
+  readonly kind = 'd1';
+  /** признак «внешнего по HTTP» хранилища — включает eff*-интервалы */
+  readonly remote = true;
+  private lastChanges = 0;
+  /** кэш eventual-списков по префиксу (лобби/дворник) */
+  private listCache = new Map<string, { at: number; rows: Array<{ key: KvKey; value: unknown; versionstamp: string }> }>();
+
+  constructor(private cfg: D1Config) {}
+
+  /** единственный HTTP-выход: POST /query {sql, params} */
+  private async run(sql: string, params: unknown[]): Promise<Array<Record<string, unknown>>> {
+    const base = this.cfg.apiBase ?? D1_API_BASE_DEFAULT;
+    const res = await fetch(`${base}/accounts/${this.cfg.accountId}/d1/database/${this.cfg.databaseId}/query`, {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${this.cfg.apiToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ sql, params }),
+    });
+    if (!res.ok) throw new Error(`D1 HTTP ${res.status}`);
+    const body = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      errors?: unknown;
+      result?: Array<{ results?: Array<Record<string, unknown>>; meta?: { changes?: number } }>;
+    } | null;
+    if (!body || body.success !== true) {
+      throw new Error(`D1 error: ${JSON.stringify(body?.errors ?? body).slice(0, 300)}`);
+    }
+    const first = body.result?.[0];
+    this.lastChanges = first?.meta?.changes ?? 0;
+    return first?.results ?? [];
+  }
+
+  /** живая проверка доступности (SELECT 1) — используется на старте */
+  async healthCheck(): Promise<boolean> {
+    try {
+      await this.run('SELECT 1 AS ok', []);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async get(key: KvKey, _opts?: { consistency?: 'strong' | 'eventual' }): Promise<KvEntry | null> {
+    // без кэша: get у нас всегда в «сильных» путях (ходы, друзья)
+    const rows = (await this.run('SELECT v, ver FROM loskutki_kv WHERE k = ?', [d1KeyId(key)])) as Array<{ v: string; ver: number }>;
+    if (!rows.length) return null;
+    return { key, value: JSON.parse(rows[0].v), versionstamp: String(rows[0].ver) };
+  }
+
+  async *list(
+    scope: { prefix: KvKey },
+    opts?: { consistency?: 'strong' | 'eventual' },
+  ): AsyncIterable<KvEntry> {
+    const p = d1KeyId(scope.prefix);
+    const strong = opts?.consistency === 'strong';
+    // eventual (лобби/дворник-косметика) — короткий кэш: пуши лобби
+    // каждые 3с + проходы дворника каждые 2с делят один и тот же SELECT
+    if (!strong) {
+      const hit = this.listCache.get(p);
+      if (hit && Date.now() - hit.at < D1_LIST_CACHE_MS) {
+        for (const e of hit.rows) yield { key: e.key, value: e.value, versionstamp: e.versionstamp };
+        return;
+      }
+    }
+    const like = d1EscapeLike(p) + '~%';
+    const rows = (await this.run(
+      "SELECT k, v, ver FROM loskutki_kv WHERE k = ? OR k LIKE ? ESCAPE '\\' ORDER BY k",
+      [p, like],
+    )) as Array<{ k: string; v: string; ver: number }>;
+    const entries = rows.map((r) => ({
+      key: r.k.split('~') as KvKey,
+      value: JSON.parse(r.v) as unknown,
+      versionstamp: String(r.ver),
+    }));
+    this.listCache.set(p, { at: Date.now(), rows: entries });
+    for (const e of entries) {
+      yield { key: e.key, value: e.value, versionstamp: e.versionstamp };
+    }
+  }
+
+  atomic(): KvAtomic {
+    return new D1Atomic(this);
+  }
+
+  /** сбросить кэш списков, которых касается ключ — после СОБСТВЕННОЙ
+   *  записи (иначе лобби/снапшот до 4с показывали бы докомнатную старьё;
+   *  свежесть относительно СОСЕДНИХ изолятов остаётся eventual, как в KV) */
+  private purgeListCacheFor(keyId: string): void {
+    if (this.listCache.size === 0) return;
+    for (const p of [...this.listCache.keys()]) {
+      if (keyId === p || keyId.startsWith(p + '~')) this.listCache.delete(p);
+    }
+  }
+
+  /** выполнить цепочку атомарных операций (см. раздел 3.6) */
+  async commitOps(
+    check: { key: KvKey; versionstamp: string | null } | null,
+    ops: Array<{ t: 'set'; k: KvKey; v: unknown } | { t: 'del'; k: KvKey }>,
+  ): Promise<{ ok: boolean }> {
+    try {
+      if (ops.length === 0) return { ok: true }; // пустой коммит = ok (как в KV)
+      const sets = ops.filter((o) => o.t === 'set');
+      const dels = ops.filter((o) => o.t === 'del');
+
+      if (check) {
+        // наши шаблоны CAS: ровно одна операция (проверено по всем
+        // вызовам в ядре); что-то иное — честно отказ, а не тихий баг
+        if (ops.length !== 1) return { ok: false };
+        if (check.versionstamp === null) {
+          // создать только если ключа нет
+          if (ops[0].t !== 'set') return { ok: false };
+          await this.run(
+            'INSERT INTO loskutki_kv (k, v, ver) VALUES (?, ?, 1) ON CONFLICT(k) DO NOTHING',
+            [d1KeyId(check.key), JSON.stringify(ops[0].v)],
+          );
+          const inserted = this.lastChanges === 1;
+          if (inserted) this.purgeListCacheFor(d1KeyId(check.key));
+          return { ok: inserted };
+        }
+        const ver = Number(check.versionstamp);
+        if (!Number.isFinite(ver)) return { ok: false };
+        if (ops[0].t === 'set') {
+          // CAS-обновление: версия должна совпасть
+          await this.run(
+            'UPDATE loskutki_kv SET v = ?, ver = ver + 1 WHERE k = ? AND ver = ?',
+            [JSON.stringify(ops[0].v), d1KeyId(check.key), ver],
+          );
+          const updated = this.lastChanges === 1;
+          if (updated) this.purgeListCacheFor(d1KeyId(check.key));
+          return { ok: updated };
+        }
+        // CAS-удаление
+        await this.run('DELETE FROM loskutki_kv WHERE k = ? AND ver = ?', [d1KeyId(check.key), ver]);
+        const deleted = this.lastChanges === 1;
+        if (deleted) this.purgeListCacheFor(d1KeyId(check.key));
+        return { ok: deleted };
+      }
+
+      // без проверки: все удаления — одним оператором (атомарно)
+      if (dels.length > 0 && sets.length === 0) {
+        const ph = dels.map(() => '?').join(', ');
+        await this.run(`DELETE FROM loskutki_kv WHERE k IN (${ph})`, dels.map((o) => d1KeyId(o.k)));
+        for (const o of dels) this.purgeListCacheFor(d1KeyId(o.k));
+        return { ok: true }; // удаление отсутствующего ключа = ok (как в KV)
+      }
+      // без проверки: все записи — мульти-UPSERT одним оператором
+      if (sets.length > 0 && dels.length === 0) {
+        const values = sets.map(() => '(?, ?, 1)').join(', ');
+        await this.run(
+          `INSERT INTO loskutki_kv (k, v, ver) VALUES ${values} ON CONFLICT(k) DO UPDATE SET v = excluded.v, ver = loskutki_kv.ver + 1`,
+          sets.flatMap((o) => [d1KeyId(o.k), JSON.stringify(o.v)]),
+        );
+        for (const o of sets) this.purgeListCacheFor(d1KeyId(o.k));
+        return { ok: true };
+      }
+      // смешанные цепочки в ядре не используются; на всякий случай —
+      // последовательно (атомарность между операциями не гарантируется)
+      for (const o of sets) {
+        await this.run(
+          'INSERT INTO loskutki_kv (k, v, ver) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET v = excluded.v, ver = loskutki_kv.ver + 1',
+          [d1KeyId(o.k), JSON.stringify(o.v)],
+        );
+        this.purgeListCacheFor(d1KeyId(o.k));
+      }
+      for (const o of dels) {
+        await this.run('DELETE FROM loskutki_kv WHERE k = ?', [d1KeyId(o.k)]);
+        this.purgeListCacheFor(d1KeyId(o.k));
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
   }
 }
 
@@ -1610,7 +1961,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
     status: room.status,
     isPublic: room.isPublic,
     mySeat: seat,
-    me: { name: me.name, avatar: me.avatar, connected: now - me.lastPoll < CONNECTED_MS },
+    me: { name: me.name, avatar: me.avatar, connected: now - me.lastPoll < CONNECTED_MS || ownerSocketAlive(room, seat) },
     // чат партии: каждому — с флагом «моё/чужое» (зритель всегда место 0)
     chat: (room.chat ?? []).map((m) => ({
       id: m.id,
@@ -1623,7 +1974,7 @@ export function viewFor(room: MpRoom, playerId: string): MpRoomView {
       ? {
           name: foe.name,
           avatar: foe.avatar,
-          connected: now - foe.lastPoll < CONNECTED_MS,
+          connected: now - foe.lastPoll < CONNECTED_MS || ownerSocketAlive(room, seat === 0 ? 1 : 0),
           left: foe.leftAt !== null,
           uid: foe.uid,
         }
@@ -1769,7 +2120,7 @@ export async function listRoomsA(): Promise<Array<{ code: string; hostName: stri
   const now = Date.now();
   const out: Array<{ code: string; hostName: string; hostAvatar: string; hostUid: string | null; createdAt: number; quick: boolean }> = [];
   for (const { room: r } of await allRooms(false)) {
-    if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null && now - r.host.lastPoll <= LIST_ALIVE_MS) {
+    if (r.isPublic && r.status === 'waiting' && r.guest === null && r.host.leftAt === null && now - r.host.lastPoll <= effListAliveMs()) {
       out.push({ code: r.code, hostName: r.host.name, hostAvatar: r.host.avatar, hostUid: r.host.uid, createdAt: r.createdAt, quick: r.quickHost === true });
     }
   }
@@ -2047,7 +2398,7 @@ async function touchUserA(uid: string, name: string, avatar: string): Promise<Fr
     lastSeen: now,
     createdAt: prev?.createdAt ?? now,
   };
-  if (!prev || prev.name !== next.name || prev.avatar !== next.avatar || now - prev.lastSeen > FR_USER_WRITE_MS) {
+  if (!prev || prev.name !== next.name || prev.avatar !== next.avatar || now - prev.lastSeen > effFrUserWriteMs()) {
     await frUserSet(next);
   }
   return next;
@@ -2251,7 +2602,7 @@ async function friendEntryFor(uid: string, f: FrRec, now: number): Promise<FrSna
     uid: f.uid,
     name: u?.name ?? 'Игрок',
     avatar: u?.avatar ?? 'ann',
-    online: u ? now - u.lastSeen < FR_ONLINE_MS : false,
+    online: u ? now - u.lastSeen < effFrOnlineMs() || uidOnLiveSocket(f.uid) : false,
     unread,
   };
 }
@@ -3000,7 +3351,7 @@ async function sweepTick(): Promise<void> {
   //      (иначе «в сети» гаснет, когда игрок просто сидит в меню)
   for (const ctx of [...sockets.values()]) {
     if (!ctx.alive || !ctx.uid) continue;
-    if (now - ctx.frTouch >= FR_TOUCH_MS) {
+    if (now - ctx.frTouch >= effFrTouchMs()) {
       ctx.frTouch = now;
       void touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
     }
@@ -3019,7 +3370,7 @@ async function sweepTick(): Promise<void> {
       let presence = false;
       for (const p of [room.host, room.guest]) {
         if (!p || p.leftAt !== null) continue;
-        if (ownerSocketAlive(room, seatOf(room, p.id) ?? -1) && Date.now() - p.lastPoll > PRESENCE_SAVE_MS) {
+        if (ownerSocketAlive(room, seatOf(room, p.id) ?? -1) && Date.now() - p.lastPoll > effPresenceSaveMs()) {
           p.lastPoll = Date.now();
           presence = true;
         }
@@ -3091,7 +3442,7 @@ async function sweepRoomsKv(): Promise<void> {
       for (const s of sockets.values()) {
         if (s.alive && s.code === room.code && s.playerId === pid) local = true;
       }
-      if (local && Date.now() - p.lastPoll > PRESENCE_SAVE_MS) {
+      if (local && Date.now() - p.lastPoll > effPresenceSaveMs()) {
         p.lastPoll = Date.now();
         presence = true;
       }
@@ -3165,6 +3516,7 @@ export async function serverStatsA(): Promise<{
   sockets: number;
   uptimeSec: number;
   kv: boolean;
+  storage: 'd1' | 'denokv' | 'memory';
 }> {
   const now = Date.now();
   let waiting = 0;
@@ -3188,7 +3540,7 @@ export async function serverStatsA(): Promise<{
   }
   let live = 0;
   for (const s of sockets.values()) if (s.alive) live++;
-  return { waiting, playing, players, sockets: live, uptimeSec: Math.floor((now - startedAt) / 1000), kv: kvOn };
+  return { waiting, playing, players, sockets: live, uptimeSec: Math.floor((now - startedAt) / 1000), kv: kvOn, storage: storageKind() };
 }
 
 // ============================================================
@@ -3198,14 +3550,21 @@ export async function serverStatsA(): Promise<{
 /** health-страница: st=null — статистика не успела посчитаться (гонка с
  *  таймаутом), показываем базовую версию — главное, что сервер ответил. */
 function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string {
+  const storageOf = st?.storage;
+  const storageLine = storageOf === 'd1'
+    ? 'Cloudflare D1 — комнаты и друзья переживают перезапуск'
+    : storageOf === 'denokv'
+      ? 'Deno KV — комнаты и друзья переживают перезапуск'
+      : 'память (данные пропадут при перезапуске)';
   const line = st
     ? `<p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
     <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
-    <p>Хранение: ${st.kv ? 'Deno KV — комнаты и друзья переживают перезапуск' : 'память'}</p>
+    <p>Хранение: ${storageLine}</p>
     ${st.kv ? '' : `<div class="warn">⚠️ База данных не подключена: друзья, переписка и комнаты
-    будут теряться при каждом перезапуске сервера. Подключите:
-    Settings → Databases → Attach Database → Provision Database (Deno KV),
-    затем redeploy.</div>`}`
+    будут теряться при каждом перезапуске сервера. Подключите бесплатную базу
+    (инструкция — в шапке файла сервера, раздел «ВАРИАНТ А/Б»):
+    Cloudflare D1 — три переменные D1_ACCOUNT_ID / D1_DATABASE_ID /
+    D1_API_TOKEN, либо Deno KV: Settings → Databases → Provision.</div>`}`
     : `<p>Сервер только что запустился — статистика появится через минуту.</p>`;
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -3364,13 +3723,43 @@ if (!isBunRuntime()) {
     chanLike = null;
   }
 
-  // 3) Deno KV — асинхронно ПОСЛЕ serve. На новой платформе Deno Deploy
-  //    базе нужен вызов БЕЗ аргументов (платформа сама подставляет базу
-  //    таймлайна; путь-аргумент там не поддерживается). Локально путь
-  //    «loskutki-kv» создаёт файл рядом со скриптом. Гонка с таймаутом:
-  //    неответившее openKv (нет подключённой базы) не подвешивает
-  //    сервер — остаёмся в режиме памяти.
+  // 3) ХРАНИЛИЩЕ — асинхронно ПОСЛЕ serve (Warm up не ждёт базу).
+  //    Приоритет: Cloudflare D1 (если заданы D1_*) → Deno KV → память.
+  //    D1 — бесплатная внешняя база для случая, когда единственная
+  //    KV-база Deno Deploy занята другим проектом (см. раздел 3.6).
   const attachKv = async (): Promise<void> => {
+    // 3а) Cloudflare D1: проверяем живость (SELECT 1) с тем же бюджетом
+    //     таймаута, что и у KV-ворот — недоступная база не подвешивает
+    //     сервер, просто идём дальше по списку.
+    const d1cfg = d1ConfigFromEnv({ get: (k) => D.env?.get(k) });
+    if (d1cfg) {
+      try {
+        const store = new D1Kv(d1cfg);
+        const healthy = await Promise.race([
+          store.healthCheck(),
+          new Promise<boolean>((r) => setTimeout(() => r(false), KV_GATE_MS)),
+        ]);
+        if (healthy) {
+          initPersistence(store, chanLike);
+          kvGateOpen(); // хранилище готово — команды идут дальше
+          console.log('[Лоскутки] Хранилище: Cloudflare D1 — комнаты и друзья переживают перезапуск');
+          return;
+        }
+        console.error(
+          '[Лоскутки] D1 задан (D1_*), но не отвечает — проверьте D1_ACCOUNT_ID / D1_DATABASE_ID / D1_API_TOKEN ' +
+            'и что в базе создана таблица loskutki_kv. Пробуем Deno KV…',
+        );
+      } catch (e) {
+        console.error('[Лоскутки] Ошибка подключения D1 — пробуем Deno KV:', e);
+      }
+    }
+
+    // 3б) Deno KV — прежнее поведение. На новой платформе Deno Deploy
+    //     базе нужен вызов БЕЗ аргументов (платформа сама подставляет базу
+    //     таймлайна; путь-аргумент там не поддерживается). Локально путь
+    //     «loskutki-kv» создаёт файл рядом со скриптом. Гонка с таймаутом:
+    //     неответившее openKv (нет подключённой базы) не подвешивает
+    //     сервер — остаёмся в режиме памяти.
     if (!D.openKv) {
       kvGateOpen();
       return;
@@ -3403,8 +3792,8 @@ if (!isBunRuntime()) {
       console.log(
         '[Лоскутки] KV НЕ подключён — режим памяти. ' +
           (deploy
-            ? 'Подключи базу: Settings → Databases → Attach Database → Provision Database (Deno KV).'
-            : 'Локально: запусти с флагом --unstable-kv.'),
+            ? 'Подключи базу: Cloudflare D1 (переменные D1_*, инструкция в шапке файла) или Settings → Databases → Attach Database → Provision Database (Deno KV).'
+            : 'Локально: запусти с флагом --unstable-kv или задай D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN.'),
       );
     }
   };
