@@ -1,6 +1,30 @@
 /**
- * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера (v3.5.0).
+ * «ЛОСКУТКИ» — WebSocket-сервер мультиплеера (v3.6.1).
  * ============================================================
+ *
+ * v3.6.1 — ВЕРСИЯ ВИДНА СНАРУЖИ + МГНОВЕННЫЙ ОТВЕТ НА НЕИЗВЕСТНЫЕ КОМАНДЫ:
+ *   — health-страница показывает «Версия сервера: v3.6.1», а новый роут
+ *     GET /version отдаёт JSON — всегда можно проверить, какой файл
+ *     реально задеплоен (раньше понять это было невозможно);
+ *   — ответ на неизвестную команду теперь приходит МГНОВЕННО с ошибкой
+ *     badpayload (раньше уходил без ref — клиент ждал таймаут 10с;
+ *     например, старый сервер так «зависал» на новой команде fr_restore);
+ *   — совместимость: клиент v3.6.1+ больше не тратит 10 секунд на
+ *     таймаут, если сервер вдруг старее клиента (fr_restore и т.п.).
+ *
+ * v3.6.0 — БАЗА ДАННЫХ БОЛЬШЕ НЕ НУЖНА (запуск одним файлом):
+ *   — друзья, переписка, заявки и постоянные ID игроков теперь хранятся
+ *     НА УСТРОЙСТВАХ игроков (карманная копия) и автоматически
+ *     восстанавливаются на сервере: как только игрок заходит в игру,
+ *     клиент присылает свою копию (команда fr_restore) — и память
+ *     сервера после сна/перезапуска наполняется заново;
+ *   — Cloudflare D1 / Deno KV стали НЕОБЯЗАТЕЛЬНЫМИ: без них ничего
+ *     настраивать не нужно, деплой = «вставить файл → Deploy»;
+ *   — база, если всё же подключена, по-прежнему работает и имеет
+ *     приоритет (D1 → KV → память+устройства): офлайн-сообщения
+ *     переживают простой сервера даже без захода отправителя в игру;
+ *   — health-страница без базы больше не пугает красным — обычная
+ *     спокойная заметка.
  *
  * v3.5.0 — ХРАНИЛИЩЕ БЕЗ DENO KV: Cloudflare D1 (бесплатно, без карты):
  *   — если KV-база Deno Deploy занята (бесплатный план даёт всего
@@ -37,14 +61,25 @@
  * поднимается под ЛЮБЫМ Deno всегда (кроме bun-тестов), а реджект
  * openKv без подключённой базы больше не убивает изолят.
  *
- * КАК РАЗВЕРНУТЬ на НОВОЙ консоли (console.deno.com, бесплатно):
+ * КАК РАЗВЕРНУТЬ на НОВОЙ консоли (console.deno.com, бесплатно, БАЗА
+ * ДАННЫХ НЕ ТРЕБУЕТСЯ — друзья и переписка восстановятся сами):
  *   1. Открой https://console.deno.com → своя организация → Applications
  *      → «New Playground» (весь сайт игры живёт на Vercel, здесь нужен
  *      только этот один файл)
  *   2. Удали содержимое main.ts и вставь ВЕСЬ этот файл целиком
- *   3. ЧТОБЫ КОМНАТЫ, ДРУЗЬЯ И ЧАТЫ ПЕРЕЖИВАЛИ ПЕРЕЗАПУСК — подключи
- *      бесплатную базу (деплой проходит и без неё, но данные будут
- *      сбрасываться при простое). ДВА варианта на выбор:
+ *   3. Нажми Deploy — ГОТОВО. Вписывать адрес в игру НЕ НУЖНО:
+ *      клиент v3.6.1+ уже подключён к loskutki.damirkolmurzin.deno.net
+ *      из коробки (поле «Сервер онлайн-игры» в Настройках — только на
+ *      случай переезда сервера на другой домен).
+ *      Проверка: открой адрес сервера в браузере — увидишь страницу
+ *      «Лоскутки: сервер онлайн» с версией v3.6.1 (или /version — JSON).
+ *   4. Запасной хостинг (если Deno Deploy недоступен): этот же файл
+ *      работает в Docker — в архиве игры есть Dockerfile.server и
+ *      render.yaml (Render.com, бесплатный план; подойдёт и Koyeb).
+ *
+ *   НЕОБЯЗАТЕЛЬНО — если захочешь ещё надёжнее (чтобы сообщения другу,
+ *      отправленные «в офлайн», доживали до его захода в игру даже при
+ *      простое сервера), подключи бесплатную базу. ДВА варианта:
  *
  *      ВАРИАНТ А — Cloudflare D1 (бесплатно, БЕЗ карты; для случая,
  *      когда единственная KV-база Deno уже занята другим проектом):
@@ -71,16 +106,6 @@
  *      ВАРИАНТ Б — Deno KV (если база свободна): Settings приложения →
  *        Databases → Attach Database → Provision Database (Deno KV).
  *
- *   4. Адрес из шапки редактора (https://<имя>...) впиши в игре:
- *      Настройки → «Сервер онлайн-игры» → Сохранить. Либо задай
- *      переменную NEXT_PUBLIC_WS_URL = https://<имя>... на Vercel.
- *   5. Проверка: открой адрес сервера в браузере — увидишь страницу
- *      «Лоскутки: сервер онлайн» (строка «Хранение» покажет, подключена
- *      ли база и какая именно).
- *   6. Запасной хостинг (если Deno Deploy недоступен): этот же файл
- *      работает в Docker — в архиве игры есть Dockerfile.server и
- *      render.yaml (Render.com, бесплатный план; подойдёт и Koyeb).
- *
  * ЧТО ВНУТРИ:
  *   — Deno.serve() поднимается МОМЕНТАЛЬНО (требование новой платформы:
  *     этап «Warm up» ждёт HTTP-сервер), хранилище подключается следом
@@ -100,7 +125,8 @@
  *   — переподключение: клиент шлёт state с кодом комнаты и playerId
  *     (сессия в localStorage) — сервер высылает ПОЛНОЕ состояние;
  *   — быстрый матч (quick match): два искателя сводятся в одну комнату;
- *   — друзья: заявки по ID, чат, приглашения (хранение в D1/KV);
+ *   — друзья: заявки по ID, чат, приглашения (хранение в D1/KV, а без
+ *     базы — карманная копия на устройстве + fr_restore при заходе);
  *   — авто-просрочка ходов (3 минуты) с паузой, если владелец не на связи;
  *   — GET / — страница «сервер онлайн» + CORS для браузера.
  *
@@ -108,7 +134,8 @@
  *   клиент → сервер: {ref, t:'create'|'join'|'state'|'move'|'control'|
  *     'chat'|'quick'|'quick_cancel'|'rooms'|'ping'|'hello'|'fr_sync'|
  *     'fr_add'|'fr_accept'|'fr_decline'|'fr_remove'|'fr_msg'|'fr_read'|
- *     'fr_chat'|'fr_invite'|'fr_invite_accept'|'fr_invite_decline', ...}
+ *     'fr_chat'|'fr_invite'|'fr_invite_accept'|'fr_invite_decline'|
+ *     'fr_restore' (карманная копия: друзья/чаты/заявки/прочитано), ...}
  *     и {t:'pong', id}
  *   сервер → клиент: {ref, ok:true|false, ...} — ответ на запрос,
  *     {t:'view', view} — мгновенный push состояния комнаты,
@@ -2459,6 +2486,18 @@ async function frReqDel(to: string, from: string): Promise<void> {
   memReq.delete(`${to}:${from}`);
 }
 
+async function frOutGet(from: string, to: string): Promise<FrOutInfo | null> {
+  if (kv) {
+    try {
+      const e = await kv.get(['fr_out', from, to], { consistency: 'strong' });
+      return e && e.value ? (e.value as FrOutInfo) : null;
+    } catch {
+      return null;
+    }
+  }
+  return memOut.get(`${from}:${to}`) ?? null;
+}
+
 async function frOutSet(from: string, to: string, at: number): Promise<void> {
   if (kv) {
     try {
@@ -2695,6 +2734,110 @@ async function friendsSnapshotA(uid: string): Promise<FrSnapshot> {
   const snap: FrSnapshot = { code: uid, friends, requests: requests.slice(0, MAX_REQS), outgoing, invites };
   frSnapCache.set(uid, { at: Date.now(), snap });
   return snap;
+}
+
+/** ВОССТАНОВЛЕНИЕ ИЗ КАРМАННОЙ КОПИИ (v3.6.0, режим без базы):
+ *  сервер проснулся/перезапустился — память пуста; игрок зашёл в игру,
+ *  клиент при hello узнал persist=false и прислал свою копию: список
+ *  друзей (карточки), входящие/исходящие заявки, переписку и отметки
+ *  «прочитано». Сливаем с тем, что уже есть (другие игроки могли
+ *  восстановиться раньше), дубликаты и мусор отбрасываем. Возвращает
+ *  число восстановленных записей. Вызывается ТОЛЬКО когда kv === null. */
+async function frRestoreA(me: string, msg: Record<string, unknown>): Promise<number> {
+  const now = Date.now();
+  let n = 0;
+
+  // 1) карточки друзей + мой список друзей
+  const friendsRaw = Array.isArray(msg.friends) ? msg.friends : [];
+  const mine = await frListGet(me);
+  const known = new Set(mine.map((f) => f.uid));
+  for (const raw of friendsRaw.slice(0, MAX_FRIENDS)) {
+    const f = raw as { uid?: unknown; name?: unknown; avatar?: unknown };
+    const uid = cleanUid(f.uid);
+    if (!uid || uid === me || known.has(uid)) continue;
+    // карточка друга (профиль), если её ещё нет — lastSeen: 0 = «не в сети»
+    if (!(await frUserGet(uid))) {
+      await frUserSet({
+        uid,
+        name: cleanName(f.name) || 'Игрок',
+        avatar: cleanAvatar(f.avatar),
+        lastSeen: 0,
+        createdAt: now,
+      });
+      n++;
+    }
+    mine.push({ uid, since: now });
+    known.add(uid);
+    n++;
+  }
+  if (mine.length) await frListSet(me, mine.slice(0, MAX_FRIENDS));
+
+  // 2) мои входящие заявки (кто звал меня, пока я не заходил)
+  const reqsRaw = Array.isArray(msg.requests) ? msg.requests : [];
+  for (const raw of reqsRaw.slice(0, MAX_REQS)) {
+    const r = raw as { from?: { uid?: unknown; name?: unknown; avatar?: unknown }; at?: unknown };
+    const uid = cleanUid(r?.from?.uid);
+    if (!uid || uid === me) continue;
+    const at = typeof r.at === 'number' ? r.at : now;
+    if (now - at > REQ_TTL_MS) continue;
+    if (!(await frReqGet(me, uid))) {
+      await frReqSet(me, uid, {
+        from: { uid, name: cleanName(r.from?.name) || 'Игрок', avatar: cleanAvatar(r.from?.avatar) },
+        at,
+      });
+      n++;
+    }
+  }
+
+  // 3) мои исходящие заявки («ожидает подтверждения»)
+  const outRaw = Array.isArray(msg.outgoing) ? msg.outgoing : [];
+  for (const raw of outRaw.slice(0, MAX_REQS)) {
+    const o = raw as { uid?: unknown; at?: unknown };
+    const uid = cleanUid(o.uid);
+    if (!uid || uid === me) continue;
+    const at = typeof o.at === 'number' ? o.at : now;
+    if (now - at > REQ_TTL_MS) continue;
+    if (!(await frOutGet(me, uid))) {
+      await frOutSet(me, uid, at);
+      n++;
+    }
+  }
+
+  // 4) переписка пар (слияние по id сообщения) + отметки «прочитано»
+  const chatsRaw = msg.chats && typeof msg.chats === 'object' ? (msg.chats as Record<string, unknown>) : {};
+  for (const [peerRaw, listRaw] of Object.entries(chatsRaw).slice(0, MAX_FRIENDS)) {
+    const peer = cleanUid(peerRaw);
+    if (!peer || peer === me || !Array.isArray(listRaw)) continue;
+    const existing = await chatGet(me, peer);
+    const seen = new Set(existing.map((m) => m.id));
+    const add: ChatMsg[] = [];
+    for (const raw2 of (listRaw as unknown[]).slice(-CHAT_CAP)) {
+      const m = raw2 as ChatMsg;
+      if (typeof m?.id !== 'string' || m.id.length > 48 || seen.has(m.id)) continue;
+      const from = cleanUid(m.from);
+      if (from !== me && from !== peer) continue; // автор — только один из пары
+      const text = typeof m.text === 'string' ? m.text.slice(0, CHAT_TEXT_MAX) : '';
+      if (!text) continue;
+      const at = typeof m.at === 'number' ? m.at : now;
+      add.push({ id: m.id, from, text, at });
+      seen.add(m.id);
+    }
+    if (add.length) {
+      const [lo, hi] = chatPair(me, peer);
+      const merged = [...existing, ...add].sort((a, b) => a.at - b.at).slice(-CHAT_CAP);
+      memChat.set(`${lo}:${hi}`, merged);
+      n += add.length;
+    }
+  }
+  const readRaw = msg.read && typeof msg.read === 'object' ? (msg.read as Record<string, unknown>) : {};
+  for (const [peerRaw, atRaw] of Object.entries(readRaw).slice(0, MAX_FRIENDS)) {
+    const peer = cleanUid(peerRaw);
+    if (!peer || peer === me) continue;
+    const at = typeof atRaw === 'number' ? atRaw : 0;
+    if (at > (await readGet(me, peer))) await readSet(me, peer, at);
+  }
+
+  return n;
 }
 
 /** принимать дружбу в обе стороны (заявку гасим) */
@@ -3118,6 +3261,24 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
         return;
       }
 
+      case 'fr_restore': {
+        // карманная копия с устройства игрока (v3.6.0): сервер без базы
+        // проснулся/перезапустился — память пуста, клиент возвращает
+        // своих друзей/заявки/чаты/«прочитано». С базой (D1/KV) копия
+        // не нужна — база источник истины, просто отдаём снапшот.
+        if (!ctx.uid) throw 'badpayload';
+        await touchUserA(ctx.uid, ctx.frName, ctx.frAvatar);
+        let restored = 0;
+        if (!kv) {
+          try {
+            restored = await frRestoreA(ctx.uid, msg);
+          } catch { /* битая копия — работаем с тем, что есть */ }
+          if (restored > 0) frSnapInvalidate(ctx.uid);
+        }
+        respond(ctx, ref, { ok: true, persist: kv !== null, restored, snapshot: await friendsSnapshotA(ctx.uid) });
+        return;
+      }
+
       case 'fr_add': {
         if (!ctx.uid) throw 'badpayload';
         const me = ctx.uid;
@@ -3292,7 +3453,9 @@ export async function handleSocketMessage(ctx: SocketCtx, raw: string): Promise<
       }
 
       default:
-        respond(ctx, null, { ok: false, error: 'badpayload' });
+        // v3.6.1: отвечаем С REF клиента — иначе он ждал таймаут 10с
+        // (старые серверы так «зависали» на новых командах вроде fr_restore)
+        respond(ctx, ref, { ok: false, error: 'badpayload' });
     }
   } catch (e) {
     const err = typeof e === 'string' ? e : 'illegal';
@@ -3547,6 +3710,11 @@ export async function serverStatsA(): Promise<{
 // 8. HTTP + ЗАПУСК DENO DEPLOY
 // ============================================================
 
+/** Версия этого файла сервера. Видна снаружи (health-страница и GET
+ *  /version) — чтобы всегда можно было проверить, какая версия реально
+ *  задеплоена, не гадая по косвенным признакам. */
+export const SERVER_VERSION = 'v3.6.1';
+
 /** health-страница: st=null — статистика не успела посчитаться (гонка с
  *  таймаутом), показываем базовую версию — главное, что сервер ответил. */
 function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string {
@@ -3555,16 +3723,16 @@ function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string
     ? 'Cloudflare D1 — комнаты и друзья переживают перезапуск'
     : storageOf === 'denokv'
       ? 'Deno KV — комнаты и друзья переживают перезапуск'
-      : 'память (данные пропадут при перезапуске)';
+      : 'память сервера + копия на устройствах игроков (база не нужна)';
   const line = st
     ? `<p>Комнат в ожидании: ${st.waiting} · идёт партий: ${st.playing}</p>
     <p>Игроков в комнатах: ${st.players} · без перезапуска: ${st.uptimeSec} с</p>
     <p>Хранение: ${storageLine}</p>
-    ${st.kv ? '' : `<div class="warn">⚠️ База данных не подключена: друзья, переписка и комнаты
-    будут теряться при каждом перезапуске сервера. Подключите бесплатную базу
-    (инструкция — в шапке файла сервера, раздел «ВАРИАНТ А/Б»):
-    Cloudflare D1 — три переменные D1_ACCOUNT_ID / D1_DATABASE_ID /
-    D1_API_TOKEN, либо Deno KV: Settings → Databases → Provision.</div>`}`
+    ${st.kv ? '' : `<div class="note">✓ База данных не подключена — и это нормально: друзья, переписка
+    и ID игроков хранятся на устройствах игроков и восстанавливаются на
+    сервере автоматически после простоя. Подключить базу (не обязательно,
+    для максимальной надёжности) — инструкция в шапке файла сервера,
+    разделы «ВАРИАНТ А/Б».</div>`}`
     : `<p>Сервер только что запустился — статистика появится через минуту.</p>`;
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -3581,14 +3749,15 @@ function healthHtml(st: Awaited<ReturnType<typeof serverStatsA>> | null): string
   p { margin: 6px 0; color: #C9BCA4; font-size: 15px; }
   .ok { display: inline-block; margin-top: 14px; padding: 8px 18px; border-radius: 999px;
         background: #4C7A3F; color: #fff; font-weight: 700; font-size: 14px; }
-  .warn { margin-top: 12px; padding: 10px 14px; border-radius: 12px; text-align: left;
-          background: #5A2A1E; border: 1px solid #B5432F; color: #FFD9CF; font-size: 13px; }
+  .note { margin-top: 12px; padding: 10px 14px; border-radius: 12px; text-align: left;
+          background: #2E3A26; border: 1px solid #4C7A3F; color: #D9E8CE; font-size: 13px; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>🧵 Лоскутки: сервер онлайн</h1>
     <p>WebSocket-сервер мультиплеера работает.</p>
+    <p style="font-weight:700">Версия сервера: ${SERVER_VERSION}</p>
     ${line}
     <span class="ok">Готов к игре</span>
   </div>
@@ -3694,6 +3863,13 @@ if (!isBunRuntime()) {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+    // v3.6.1: версия сервера в JSON — проверка деплоя одним curl
+    if (url.pathname === '/version') {
+      return new Response(
+        JSON.stringify({ version: SERVER_VERSION.slice(1), server: SERVER_VERSION, name: 'Лоскутки' }),
+        { headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders() } },
+      );
     }
     if (url.pathname === '/' || url.pathname === '/health') {
       try {

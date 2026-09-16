@@ -51,7 +51,7 @@ import {
 import { loadStore, type FriendFoeStat } from '@/lib/storage';
 import { loadProfile, normalizeFriendCode } from '@/lib/net';
 import { ConfirmDialog } from './ConfirmDialog';
-import { DatabaseZap } from 'lucide-react';
+import { Smartphone } from 'lucide-react';
 
 const INVITE_TTL_MS = 60_000;
 
@@ -323,11 +323,11 @@ export function FriendsDialog({ open, onOpenChange, onJoinRoom }: FriendsDialogP
           </div>
         ) : (
           <div className="space-y-3">
-            {/* на сервере не подключена база — данные не переживут простой:
-                честно предупреждаем (и как починить) */}
+            {/* сервер без базы: друзья и переписка живут в карманной копии
+                на устройстве и восстанавливаются на сервере автоматически */}
             {fr.ready && !fr.persist && (
-              <div className="flex items-start gap-2.5 rounded-xl border-2 border-[#C33A2F]/45 bg-[#C33A2F]/8 p-3">
-                <DatabaseZap className="mt-0.5 h-5 w-5 shrink-0 text-[#8f2a20]" />
+              <div className="flex items-start gap-2.5 rounded-xl border-2 border-[#4C7A3F]/40 bg-[#4C7A3F]/8 p-3">
+                <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-[#3F6A34]" />
                 <div className="min-w-0">
                   <div className="text-[13.5px] font-extrabold text-foreground">{t('fr_persist_t')}</div>
                   <div className="mt-0.5 text-[11.5px] font-semibold text-muted-foreground">{t('fr_persist_d')}</div>

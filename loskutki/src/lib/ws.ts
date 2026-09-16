@@ -3,8 +3,9 @@
 /**
  * WebSocket-транспорт онлайн-режима «Лоскутки».
  *
- * Подключается к серверу Deno Deploy (адрес — NEXT_PUBLIC_WS_URL, задаётся
- * в настройках Vercel; пусто → игра работает по старым API-роутам Vercel).
+ * Подключается к серверу Deno Deploy. Адрес ВШИТ В СБОРКУ и работает из
+ * коробки (DEFAULT_WS_URL ниже); NEXT_PUBLIC_WS_URL в настройках Vercel
+ * и ручной адрес в Настройках игры могут его переопределить.
  *
  * Стабильность (главные правила):
  *  — запрос/ответ по ref: каждая mp* функция — это {ref, t, ...} и ответ
@@ -66,6 +67,12 @@ const IDLE_CLOSE_MS = 60_000; // нет подписок и запросов →
  *  не трогая переменные окружения Vercel. 'off'/'none' — выключить WS. */
 export const WS_URL_OVERRIDE_KEY = 'loskutki.wsUrl';
 
+/** АДРЕС СЕРВЕРА ОНЛАЙН-ИГРЫ ПО УМОЛЧАНИЮ — вшит в сборку, онлайн-режим
+ *  работает из коробки без всяких настроек. Приоритет адреса:
+ *  ручной (Настройки) → NEXT_PUBLIC_WS_URL (Vercel) → этот адрес.
+ *  Меняется только если сервер переедет на другой домен. */
+export const DEFAULT_WS_URL = 'wss://loskutki.damirkolmurzin.deno.net';
+
 function readOverride(): string {
   try {
     if (typeof window === 'undefined') return '';
@@ -76,12 +83,13 @@ function readOverride(): string {
 }
 
 /** адрес WS-сервера. Пусто — WS-режим выключен (HTTP-роуты).
- *  Приоритет: ручной адрес из Настроек → значение из next.config (Deno
- *  Deploy, задаётся env NEXT_PUBLIC_WS_URL, «off»/«none» — выключить). */
+ *  Приоритет: ручной адрес из Настроек → NEXT_PUBLIC_WS_URL (Vercel,
+ *  «off»/«none» — выключить) → DEFAULT_WS_URL (вшитый адрес). */
 export function wsUrl(): string {
   let raw = readOverride();
   if (!raw) raw = (process.env.NEXT_PUBLIC_WS_URL ?? '').trim();
-  if (!raw || /^(off|none|disabled)$/i.test(raw)) return '';
+  if (!raw) raw = DEFAULT_WS_URL;
+  if (/^(off|none|disabled)$/i.test(raw)) return '';
   let u = raw.replace(/\/+$/, '');
   if (/^wss:\/\//i.test(u) || /^ws:\/\//i.test(u)) return u;
   if (/^https:\/\//i.test(u)) return 'wss://' + u.slice(8);
