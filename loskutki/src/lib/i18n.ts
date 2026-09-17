@@ -269,6 +269,10 @@ const DICT: Record<string, [string, string]> = {
   stats_friends: ['С друзьями', 'With friends'],
   ach_locked: ['Ещё не открыто', 'Not unlocked yet'],
   ach_unlocked_at: ['Открыто: {d}', 'Unlocked: {d}'],
+  ach_progress: ['открыто {g} из {n}', 'unlocked {g} of {n}'],
+  ach_tier1: ['Лёгкое', 'Easy'],
+  ach_tier2: ['Среднее', 'Medium'],
+  ach_tier3: ['Сложное', 'Hard'],
 
   // — настройки —
   set_title: ['Настройки', 'Settings'],
@@ -533,6 +537,22 @@ const ACH: Record<string, [string, string, string, string]> = {
   'daily-win': ['Идеальный день', 'Perfect day', 'Победить в Игре дня', 'Win the Daily game'],
   'leather-5': ['Кожаная классика', 'Leather classic', 'Зашить все 5 кожаных лоскутков за партию', 'Sew all 5 leather patches in one game'],
   'wins-10': ['Дуэлянт', 'Duelist', 'Выиграть 10 партий', 'Win 10 games'],
+  // ===== новые (v3.10.0) — больше и сложнее =====
+  'games-100': ['Ветеран ателье', 'Atelier veteran', 'Сыграть 100 партий', 'Play 100 games'],
+  'wins-25': ['Гроза ателье', 'Terror of the atelier', 'Выиграть 25 партий', 'Win 25 games'],
+  'wins-50': ['Легенда ателье', 'Atelier legend', 'Выиграть 50 партий', 'Win 50 games'],
+  'streak-5': ['Пять подряд', 'Five in a row', 'Пять побед подряд', 'Five wins in a row'],
+  'streak-10': ['Десять подряд', 'Ten in a row', 'Десять побед подряд', 'Ten wins in a row'],
+  'beat-elza-5': ['Кутюрье повержена', 'Elza tamed', 'Победить Кутюрье Эльзу пять раз', 'Beat Couturier Elza five times'],
+  'beat-all': ['Полная коллекция', 'Full collection', 'Победить каждого из трёх соперников', 'Beat all three opponents'],
+  'big-score-50': ['Молния', 'Lightning', 'Выиграть со счётом 50+', 'Win with a score of 50+'],
+  'rich-30': ['Сокровищница', 'Treasure vault', 'Завершить партию с 30+ пуговицами', 'Finish a game with 30+ buttons'],
+  'margin-15': ['Разгром', 'Blowout', 'Победить с перевесом 15+ очков', 'Win by 15+ points'],
+  'perfect-quilt': ['Абсолютное полотно', 'Absolute quilt', 'Закрыть все 81 клетку полотна', 'Cover all 81 cells of the quilt'],
+  'daily-7': ['Идеальная неделя', 'Perfect week', 'Победить в Игре дня в 7 разных днях', 'Win the Daily game on 7 different days'],
+  'online-win': ['Дуэль по сети', 'Online duel', 'Выиграть онлайн-партию', 'Win an online game'],
+  'online-wins-10': ['Сетевой чемпион', 'Online champion', 'Выиграть 10 онлайн-партий', 'Win 10 online games'],
+  'avg-cov-70': ['Ювелирная точность', 'Jeweler\u2019s precision', 'В среднем 70+ закрытых клеток за партию (минимум 10 партий)', 'Average 70+ covered cells per game (10+ games)'],
 };
 
 export function achTitle(lang: Lang, id: string): string {

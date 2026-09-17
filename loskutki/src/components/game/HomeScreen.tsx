@@ -787,7 +787,16 @@ function StatsDialog({
           <BigStat value={s.leatherMax} label={t('stats_leather')} />
         </div>
         <div className="stitch-divider my-2" />
-        <h3 className="font-display text-[18px]">{t('stats_ach')}</h3>
+        <h3 className="font-display flex items-baseline justify-between gap-2 text-[18px]">
+          <span>{t('stats_ach')}</span>
+          {/* прогресс: сколько открыто из общего числа */}
+          <span className="text-[12px] font-bold text-muted-foreground">
+            {t('ach_progress', {
+              g: ACHIEVEMENTS.filter((a) => store.achievements[a.id]).length,
+              n: ACHIEVEMENTS.length,
+            })}
+          </span>
+        </h3>
         <div className="grid grid-cols-2 gap-2">
           {ACHIEVEMENTS.map((a) => {
             const got = !!store.achievements[a.id];
@@ -807,8 +816,13 @@ function StatsDialog({
                   <span className="block truncate text-[13px] font-extrabold text-foreground">
                     {achTitle(lang, a.id)}
                   </span>
-                  <span className="block text-[11px] font-semibold text-muted-foreground">
-                    {got ? '✓' : '🔒'}
+                  {/* сложность — звёздочками (тёмный янтарь = сколько звёзд, столько сложность) */}
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold leading-tight">
+                    <span className="tracking-[0.1em]">
+                      <span className="text-[#C4830D]">{'★'.repeat(a.tier)}</span>
+                      <span className="text-muted-foreground/35">{'★'.repeat(3 - a.tier)}</span>
+                    </span>
+                    <span className="text-muted-foreground">{got ? '✓' : '🔒'}</span>
                   </span>
                 </span>
               </button>
@@ -873,6 +887,15 @@ function StatsDialog({
                   }}
                 >
                   {ACHIEVEMENTS.find((a) => a.id === achOpen)?.icon}
+                </span>
+                {/* сложность: звёзды + слово (звёзды видны и в сетке, тут — с подписью) */}
+                <span className="flex items-center gap-2">
+                  <span className="text-[15px] tracking-[0.15em] text-[#C4830D]">
+                    {'★'.repeat(ACHIEVEMENTS.find((a) => a.id === achOpen)?.tier ?? 1)}
+                  </span>
+                  <span className="text-[12px] font-bold uppercase tracking-wide text-muted-foreground">
+                    {t(`ach_tier${ACHIEVEMENTS.find((a) => a.id === achOpen)?.tier ?? 1}`)}
+                  </span>
                 </span>
                 <p className="text-center text-[14px] font-semibold text-foreground">
                   {achDesc(lang, achOpen)}

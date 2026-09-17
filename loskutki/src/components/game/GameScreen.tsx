@@ -380,6 +380,8 @@ export function GameScreen({ state, onState, onExit, onRematch, onOpenRules, onl
           leatherPlaced: state.players[0].board.filter((v) => v === LEATHER_ID).length,
           tile7x7: state.players[0].tile7x7,
           finalButtons: state.players[0].buttons,
+          // итог соперника — для достижения «Разгром» (перевес 15+)
+          foeScore: r.scores[1].total,
           mode: state.mode,
           dailyKey: state.mode === 'daily' ? todayKey() : undefined,
           // онлайн с известным uid соперника — личный счёт в «С друзьях»

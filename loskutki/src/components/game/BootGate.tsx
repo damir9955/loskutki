@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { APP_VERSION, BOOT_MARKER_KEY } from '@/lib/version';
 import { t } from '@/lib/i18n';
+import { keepPortraitLocked } from '@/lib/orientation';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
 type BootState =
@@ -258,6 +259,10 @@ export function BootGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // v3.10.0: телефоны — просим ОС держать ПОРТРЕТ (в приложении/
+    // полном экране некоторые браузеры крутят экран по датчику, игнорируя
+    // системный замок); планшетам и обычным вкладкам — без разницы
+    keepPortraitLocked();
     if (readMarker()) {
       // приложение полностью скачано ранее — открываем сразу;
       // обновление (если задеплоено) service-воркер тянет сам в фоне.

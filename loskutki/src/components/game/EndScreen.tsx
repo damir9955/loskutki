@@ -285,12 +285,27 @@ function ScoreList({
     <div className={`mt-2 space-y-1 text-[13.5px] font-semibold transition-opacity duration-500 ${shown ? 'opacity-100' : 'opacity-0'}`}>
       <Row label={t('e_buttons')} value={`+${s.buttons}`} />
       <Row label={t('e_tile')} value={s.tile > 0 ? `+${s.tile}` : '—'} gold={s.tile > 0} dim={s.tile <= 0} />
-      <Row
-        label={s.emptyCount > 0 ? t('e_empty_cells', { n: s.emptyCount }) : t('e_empty_cells_plain')}
-        value={s.emptyCount > 0 ? `${s.empty}` : '—'}
-        bad={s.emptyCount > 0}
-        dim={s.emptyCount <= 0}
-      />
+      {/* Пустые клетки — В ДВЕ СТРОКИ: в узкой колонке «Пустые клетки (23)
+          −46» в одну строку не помещалось, подпись обрезалась многоточием.
+          Подпись — первой строкой (на всю ширину), штраф — второй справа.
+          Блок ВСЕГДА двухстрочный (и когда «—»), чтобы «Итог» у обоих
+          игроков оставался на одном уровне (см. шапку ScoreList). */}
+      <div className="flex flex-col">
+        <span
+          className={
+            s.emptyCount <= 0 ? 'text-muted-foreground/45' : 'text-muted-foreground'
+          }
+        >
+          {s.emptyCount > 0 ? t('e_empty_cells', { n: s.emptyCount }) : t('e_empty_cells_plain')}
+        </span>
+        <span
+          className={`self-end tabular-nums ${
+            s.emptyCount <= 0 ? 'text-muted-foreground/45' : 'text-destructive'
+          }`}
+        >
+          {s.emptyCount > 0 ? `${s.empty}` : '—'}
+        </span>
+      </div>
       <div className="stitch-divider !my-1" />
       <div className="flex justify-between text-[15px] font-extrabold">
         <span>{mine ? t('e_my_score') : t('e_score')}</span>

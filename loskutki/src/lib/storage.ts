@@ -33,6 +33,9 @@ export interface StatsStore {
     streak: number;
     bestStreak: number;
     leatherMax: number;
+    /** онлайн-партии (с друзьями и по коду) — общий счёт для достижений */
+    onlineGames: number;
+    onlineWins: number;
   };
   achievements: Record<string, number>;
   daily: Record<string, DailyRecord>;
@@ -67,6 +70,8 @@ export const DEFAULT_STORE: StatsStore = {
     streak: 0,
     bestStreak: 0,
     leatherMax: 0,
+    onlineGames: 0,
+    onlineWins: 0,
   },
   achievements: {},
   daily: {},
@@ -149,21 +154,39 @@ export function notifyStoreChanged() {
 export interface Achievement {
   id: string;
   icon: string; // emoji-иконка; название и описание — в i18n (achTitle/achDesc)
+  /** сложность: 1 — лёгкое, 2 — среднее, 3 — сложное (звёзды в статистике) */
+  tier: 1 | 2 | 3;
 }
 
+// Порядок = прогрессия: от простых к сложным, ★3 — в конце списка.
 export const ACHIEVEMENTS: Achievement[] = [
-  { id: 'first-win', icon: '🧵' },
-  { id: 'games-5', icon: '🪡' },
-  { id: 'games-25', icon: '🧶' },
-  { id: 'tile7x7', icon: '🏅' },
-  { id: 'full-quilt', icon: '✨' },
-  { id: 'big-score', icon: '💎' },
-  { id: 'rich', icon: '🪙' },
-  { id: 'beat-elza', icon: '👑' },
-  { id: 'streak-3', icon: '🔥' },
-  { id: 'daily-win', icon: '📅' },
-  { id: 'leather-5', icon: '🥾' },
-  { id: 'wins-10', icon: '⚔️' },
+  { id: 'first-win', icon: '🧵', tier: 1 },
+  { id: 'games-5', icon: '🪡', tier: 1 },
+  { id: 'games-25', icon: '🧶', tier: 1 },
+  { id: 'daily-win', icon: '📅', tier: 1 },
+  { id: 'online-win', icon: '🤝', tier: 1 },
+  { id: 'wins-10', icon: '⚔️', tier: 1 },
+  { id: 'tile7x7', icon: '🏅', tier: 2 },
+  { id: 'full-quilt', icon: '✨', tier: 2 },
+  { id: 'big-score', icon: '💎', tier: 2 },
+  { id: 'rich', icon: '🪙', tier: 2 },
+  { id: 'streak-3', icon: '🔥', tier: 2 },
+  { id: 'beat-elza', icon: '👑', tier: 2 },
+  { id: 'games-100', icon: '📚', tier: 2 },
+  { id: 'wins-25', icon: '🎖️', tier: 2 },
+  { id: 'beat-all', icon: '🧩', tier: 2 },
+  { id: 'daily-7', icon: '📆', tier: 2 },
+  { id: 'leather-5', icon: '🥾', tier: 3 },
+  { id: 'wins-50', icon: '🏆', tier: 3 },
+  { id: 'streak-5', icon: '💫', tier: 3 },
+  { id: 'streak-10', icon: '🚀', tier: 3 },
+  { id: 'beat-elza-5', icon: '👗', tier: 3 },
+  { id: 'big-score-50', icon: '⚡', tier: 3 },
+  { id: 'rich-30', icon: '💰', tier: 3 },
+  { id: 'margin-15', icon: '🥊', tier: 3 },
+  { id: 'avg-cov-70', icon: '📐', tier: 3 },
+  { id: 'online-wins-10', icon: '🌐', tier: 3 },
+  { id: 'perfect-quilt', icon: '💠', tier: 3 },
 ];
 
 export interface GameSummary {
@@ -174,6 +197,8 @@ export interface GameSummary {
   leatherPlaced: number;
   tile7x7: boolean;
   finalButtons: number;
+  /** итог соперника — для достижений про перевес («Разгром») */
+  foeScore: number;
   mode: 'casual' | 'daily' | 'online';
   dailyKey?: string;
   /** онлайн-партия с другом —uid/имя/аватар соперника для «С друзьями» */
@@ -188,14 +213,22 @@ export function recordGame(store: StatsStore, summary: GameSummary): {
   const next = structuredCloneSafe(store);
   const s = next.stats;
   s.games++;
-  s.byLevel[summary.botLevel].games++;
+  // по уровням ботов — только партии ПРОТИВ БОТОВ: у онлайн-партий
+  // botLevel технически 'fedor', но это живой соперник — не считать его
+  // победой над Фёдором (иначе врёт «побед: X из Y» и «Полная коллекция»)
+  const vsBot = summary.mode !== 'online';
+  if (vsBot) s.byLevel[summary.botLevel].games++;
   const covered = summary.coverage;
   s.totalCoverage += covered;
   if (covered > s.bestCoverage) s.bestCoverage = covered;
   if (summary.leatherPlaced > s.leatherMax) s.leatherMax = summary.leatherPlaced;
+  if (summary.mode === 'online') {
+    s.onlineGames++;
+    if (summary.won) s.onlineWins++;
+  }
   if (summary.won) {
     s.wins++;
-    s.byLevel[summary.botLevel].wins++;
+    if (vsBot) s.byLevel[summary.botLevel].wins++;
     s.streak++;
     if (s.streak > s.bestStreak) s.bestStreak = s.streak;
     if (summary.score > s.bestScore) s.bestScore = summary.score;
@@ -240,11 +273,27 @@ export function recordGame(store: StatsStore, summary: GameSummary): {
   check('full-quilt', covered >= 78);
   check('big-score', summary.won && summary.score >= 30);
   check('rich', summary.finalButtons >= 20);
-  check('beat-elza', summary.won && summary.botLevel === 'elza');
+  check('beat-elza', summary.won && summary.botLevel === 'elza' && vsBot);
   check('streak-3', s.streak >= 3);
   check('daily-win', summary.won && summary.mode === 'daily');
   check('leather-5', summary.leatherPlaced >= 5);
   check('wins-10', s.wins >= 10);
+  // ===== новые (v3.10.0): больше и сложнее =====
+  check('games-100', s.games >= 100);
+  check('wins-25', s.wins >= 25);
+  check('wins-50', s.wins >= 50);
+  check('streak-5', s.streak >= 5);
+  check('streak-10', s.streak >= 10);
+  check('beat-elza-5', s.byLevel.elza.wins >= 5);
+  check('beat-all', (Object.keys(s.byLevel) as BotLevel[]).every((l) => s.byLevel[l].wins >= 1));
+  check('big-score-50', summary.won && summary.score >= 50);
+  check('rich-30', summary.finalButtons >= 30);
+  check('margin-15', summary.won && summary.score - summary.foeScore >= 15);
+  check('perfect-quilt', covered >= 81);
+  check('daily-7', Object.values(next.daily).filter((d) => d.won).length >= 7);
+  check('online-win', summary.won && summary.mode === 'online');
+  check('online-wins-10', s.onlineWins >= 10);
+  check('avg-cov-70', s.games >= 10 && s.totalCoverage / s.games >= 70);
 
   return { store: next, unlocked };
 }
